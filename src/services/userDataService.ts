@@ -619,6 +619,12 @@ class UserDataService {
       console.log(`Final items array for bill ${billData.bill_number}:`, items);
       console.log(`Items count: ${items.length}`);
 
+      // If no items found, return null to prevent inconsistent bill objects
+      if (items.length === 0) {
+        console.error(`Bill ${billData.bill_number} has no valid items, skipping`);
+        return null;
+      }
+
       const bill: Bill = {
         id: billData.id,
         billNumber: billData.bill_number,
@@ -648,9 +654,6 @@ class UserDataService {
       }
       
       console.log(`FINAL BILL OBJECT: ${bill.billNumber} with ${bill.items.length} items`);
-      if (bill.items.length === 0) {
-        console.error(`WARNING: Bill ${bill.billNumber} has no items! This may indicate a data retrieval problem.`);
-      }
       return bill;
     } catch (error) {
       console.error('Error getting bill with details:', error);
