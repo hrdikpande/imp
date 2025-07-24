@@ -208,6 +208,23 @@ class UserDataService {
     }
   }
 
+  private async _getAnyCustomerById(customerId: string): Promise<Customer | null> {
+    const userId = this.getCurrentUserId();
+    
+    try {
+      const result = await multiTenantDb.executeQuery(
+        userId,
+        'SELECT * FROM customers WHERE id = ?',
+        [customerId]
+      );
+      
+      return result && result.id ? this.mapCustomerFromDb(result) : null;
+    } catch (error) {
+      console.error('Error loading customer (any status):', error);
+      return null;
+    }
+  }
+
   public async updateUserCustomer(customerId: string, updates: Partial<Customer>): Promise<{ success: boolean; message: string; customer?: Customer }> {
     const userId = this.getCurrentUserId();
     
@@ -513,21 +530,11 @@ class UserDataService {
     const userId = this.getCurrentUserId();
     
     try {
-      // Get customer
-      let customer = await this.getUserCustomerById(billData.customer_id);
+      // Get customer (including inactive ones for historical bills)
+      let customer = await this._getAnyCustomerById(billData.customer_id);
       if (!customer) {
         console.error('Customer not found for bill:', billData.id, 'customer_id:', billData.customer_id);
-        // Try to get customer from any active customers if the specific one is not found
-        const allCustomers = await this.getUserCustomers();
-        const fallbackCustomer = allCustomers.find(c => c.id === billData.customer_id);
-        
-        if (!fallbackCustomer) {
-          console.error('Customer not found even in fallback search');
-          return null;
-        }
-        
-        console.log('Using fallback customer:', fallbackCustomer);
-        customer = fallbackCustomer;
+        return null;
       }
 
       // Get bill items
