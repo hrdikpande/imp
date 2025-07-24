@@ -570,7 +570,20 @@ class UserDataService {
       
       const items = [];
       for (const itemData of itemResults) {
-        const product = await this.getUserProductById(itemData.product_id);
+        // Try to get active product first, then try any product (including inactive)
+        let product = await this.getUserProductById(itemData.product_id);
+        if (!product) {
+          // If active product not found, try to get any product (including inactive)
+          const productResult = await multiTenantDb.executeQuery(
+            userId,
+            'SELECT * FROM products WHERE id = ?',
+            [itemData.product_id]
+          );
+          if (productResult && productResult.id) {
+            product = this.mapProductFromDb(productResult);
+          }
+        }
+        
         if (product) {
           const billItem = {
             id: itemData.id,
@@ -586,8 +599,10 @@ class UserDataService {
             taxAmount: itemData.tax_amount || 0,
             subtotal: itemData.subtotal,
             total: itemData.total
-          }
+          };
           items.push(billItem);
+        } else {
+          console.warn(`Product not found for bill item: ${itemData.product_id} in bill: ${billData.bill_number}`);
         }
       }
 
