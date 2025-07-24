@@ -65,7 +65,10 @@ export const generateBillNumber = (): string => {
   const year = date.getFullYear().toString().slice(-2);
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  const time = date.getHours().toString().padStart(2, '0') + 
+               date.getMinutes().toString().padStart(2, '0') + 
+               date.getSeconds().toString().padStart(2, '0');
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   
-  return `INV-${year}${month}${day}-${random}`;
+  return `INV-${year}${month}${day}-${time}-${random}`;
 };

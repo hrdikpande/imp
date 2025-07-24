@@ -293,6 +293,17 @@ class UserDataService {
         return { success: false, message: 'Bill must have at least one item' };
       }
       
+      // Validate customer exists
+      if (!billData.customer || !billData.customer.id) {
+        return { success: false, message: 'Bill must have a valid customer' };
+      }
+      
+      // Verify customer exists in database
+      const customerExists = await this.getUserCustomerById(billData.customer.id);
+      if (!customerExists) {
+        return { success: false, message: 'Selected customer does not exist' };
+      }
+      
       // Enhanced validation for each item
       for (const item of billData.items) {
         if (!item.product || !item.product.id) {
@@ -309,6 +320,39 @@ class UserDataService {
       const billId = uuidv4();
       const now = Date.now();
 
+      // Generate unique bill number with retry logic
+      let billNumber = billData.billNumber;
+      let retryCount = 0;
+      const maxRetries = 10;
+      
+      while (retryCount < maxRetries) {
+        try {
+          // Check if bill number already exists
+          const existingBill = await multiTenantDb.executeQuery(
+            userId,
+            'SELECT id FROM bills WHERE bill_number = ?',
+            [billNumber]
+          );
+          
+          if (!existingBill || !existingBill.id) {
+            // Bill number is unique, break the loop
+            break;
+          }
+          
+          // Generate new bill number and retry
+          const { generateBillNumber } = await import('../utils/calculations');
+          billNumber = generateBillNumber();
+          retryCount++;
+          
+        } catch (error) {
+          console.error('Error checking bill number uniqueness:', error);
+          return { success: false, message: 'Failed to generate unique bill number' };
+        }
+      }
+      
+      if (retryCount >= maxRetries) {
+        return { success: false, message: 'Unable to generate unique bill number after multiple attempts' };
+      }
       // Insert bill
       const billQuery = `
         INSERT INTO bills (
@@ -319,7 +363,7 @@ class UserDataService {
       `;
 
       await multiTenantDb.executeUpdate(userId, billQuery, [
-        billId, billData.billNumber, billData.customer.id, billData.subtotal,
+        billId, billNumber, billData.customer.id, billData.subtotal,
         billData.totalDiscount, billData.billDiscountType || 'fixed',
         billData.billDiscountValue || 0, billData.billDiscountAmount || 0,
         billData.totalTax || 0, billData.total, billData.paymentMode || null,
@@ -448,8 +492,19 @@ class UserDataService {
       // Get customer
       const customer = await this.getUserCustomerById(billData.customer_id);
       if (!customer) {
-        console.error('Customer not found for bill:', billData.id);
-        return null;
+        console.error('Customer not found for bill:', billData.id, 'customer_id:', billData.customer_id);
+        // Try to get customer from any active customers if the specific one is not found
+        const allCustomers = await this.getUserCustomers();
+        const fallbackCustomer = allCustomers.find(c => c.id === billData.customer_id);
+        
+        if (!fallbackCustomer) {
+          console.error('Customer not found even in fallback search');
+          return null;
+        }
+        
+        console.log('Using fallback customer:', fallbackCustomer);
+        // Use the fallback customer
+        const customer = fallbackCustomer;
       }
 
       // Get bill items
@@ -508,7 +563,8 @@ class UserDataService {
       
       // Validate bill totals
       if (!billData.total || billData.total <= 0) {
-        return { success: false, message: `Bill total is invalid: ${billData.total}` };
+        console.error(`Bill total is invalid: ${billData.total}`);
+        return null;
       }
       
       console.log(`Bill loaded: ${bill.billNumber} with ${bill.items.length} items`);
