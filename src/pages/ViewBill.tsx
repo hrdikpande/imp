@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useEnhancedBilling } from '../context/EnhancedBillingContext';
 import { useEnhancedAuth } from '../context/EnhancedAuthContext';
 import { ArrowLeft, Printer, FileText, Trash2, Download, FileDown } from 'lucide-react';

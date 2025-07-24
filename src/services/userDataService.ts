@@ -619,10 +619,9 @@ class UserDataService {
       console.log(`Final items array for bill ${billData.bill_number}:`, items);
       console.log(`Items count: ${items.length}`);
 
-      // If no items found, return null to prevent inconsistent bill objects
+      // Log warning if no items found but still return the bill
       if (items.length === 0) {
-        console.error(`Bill ${billData.bill_number} has no valid items, skipping`);
-        return null;
+        console.warn(`Bill ${billData.bill_number} has no valid items, but returning bill object for UI handling`);
       }
 
       const bill: Bill = {
@@ -647,10 +646,9 @@ class UserDataService {
         updatedAt: billData.updated_at
       };
       
-      // Validate bill totals
+      // Log warning for invalid totals but still return the bill
       if (!billData.total || billData.total <= 0) {
-        console.error(`Bill total is invalid: ${billData.total}`);
-        return null;
+        console.warn(`Bill ${billData.bill_number} has invalid total: ${billData.total}, but returning bill object for UI handling`);
       }
       
       console.log(`FINAL BILL OBJECT: ${bill.billNumber} with ${bill.items.length} items`);
