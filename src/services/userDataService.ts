@@ -503,8 +503,7 @@ class UserDataService {
         }
         
         console.log('Using fallback customer:', fallbackCustomer);
-        // Use the fallback customer
-        const customer = fallbackCustomer;
+        customer = fallbackCustomer;
       }
 
       // Get bill items
