@@ -42,18 +42,36 @@ const BillItemsTable: React.FC<BillItemsTableProps> = ({
         </thead>
         <tbody className="divide-y divide-gray-200">
           {items.map((item, index) => {
-            // Get unit price from multiple possible sources
+            // Enhanced unit price validation with multiple fallbacks
             const unitPrice = item.unitPrice || item.product?.unitPrice || item.product?.price || 0;
             const productName = item.product?.name || 'Unknown Product';
             const productCode = item.product?.code || 'N/A';
             
+            // Validate item data and show warnings
+            const hasValidData = item && item.product && productName !== 'Unknown Product' && unitPrice > 0 && item.quantity > 0;
+            
+            if (!hasValidData) {
+              console.warn(`BillItemsTable: Item ${index + 1} has invalid data:`, {
+                hasItem: !!item,
+                hasProduct: !!item?.product,
+                productName,
+                unitPrice,
+                quantity: item?.quantity
+              });
+            }
+            
             return (
-              <tr key={index} className="table-row">
+              <tr key={index} className={`table-row ${!hasValidData ? 'bg-red-50' : ''}`}>
                 <td className="font-medium text-gray-900">{index + 1}</td>
                 <td>
                   <div>
                     <div className="font-medium text-gray-900">
                       {productName}
+                      {!hasValidData && (
+                        <span className="ml-2 text-xs text-red-600 font-normal">
+                          (Invalid Data)
+                        </span>
+                      )}
                     </div>
                     {item.product?.description && (
                       <div className="text-xs text-gray-500">
@@ -63,8 +81,18 @@ const BillItemsTable: React.FC<BillItemsTableProps> = ({
                   </div>
                 </td>
                 <td className="text-sm text-gray-700">{productCode}</td>
-                <td className="font-medium">{formatCurrency(unitPrice)}</td>
-                <td className="text-center font-medium">{item.quantity}</td>
+                <td className={`font-medium ${unitPrice <= 0 ? 'text-red-600' : ''}`}>
+                  {formatCurrency(unitPrice)}
+                  {unitPrice <= 0 && (
+                    <div className="text-xs text-red-600">Invalid Price</div>
+                  )}
+                </td>
+                <td className={`text-center font-medium ${!item.quantity || item.quantity <= 0 ? 'text-red-600' : ''}`}>
+                  {item.quantity || 0}
+                  {(!item.quantity || item.quantity <= 0) && (
+                    <div className="text-xs text-red-600">Invalid Qty</div>
+                  )}
+                </td>
                 <td className="text-sm">
                   {item.discountType === 'fixed'
                     ? formatCurrency(item.discountValue || 0)
@@ -76,8 +104,11 @@ const BillItemsTable: React.FC<BillItemsTableProps> = ({
                   )}
                 </td>
                 <td className="font-medium">{formatCurrency(item.subtotal || 0)}</td>
-                <td className="font-bold text-blue-600">
+                <td className={`font-bold ${hasValidData ? 'text-blue-600' : 'text-red-600'}`}>
                   {formatCurrency(item.total || 0)}
+                  {!hasValidData && (
+                    <div className="text-xs text-red-600 font-normal">Check Data</div>
+                  )}
                 </td>
                 {!readOnly && (
                   <td>
@@ -110,6 +141,9 @@ const BillItemsTable: React.FC<BillItemsTableProps> = ({
         <tr>
           <td colSpan={readOnly ? 6 : 7} className="px-6 py-3 text-right font-medium text-gray-900">
             Total Items: {items.length}
+            {items.some(item => !item || !item.product || !item.product.name || !item.quantity || item.quantity <= 0) && (
+              <span className="ml-2 text-red-600 text-sm">(Some items have invalid data)</span>
+            )}
           </td>
           <td className="px-6 py-3 font-bold text-blue-600">
             {formatCurrency(items.reduce((sum, item) => sum + (item.total || 0), 0))}

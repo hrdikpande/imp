@@ -362,7 +362,7 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       return;
     }
     
-    // Validate item data
+    // Enhanced validation for item data
     if (!item.product || !item.product.id) {
       console.error('EnhancedBillingContext: Invalid item - missing product data:', item);
       toast.error('Invalid product data');
@@ -375,26 +375,36 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       return;
     }
     
-    if (!item.unitPrice || item.unitPrice <= 0) {
+    // Enhanced unit price validation with fallbacks
+    const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+    if (unitPrice <= 0) {
       console.error('EnhancedBillingContext: Invalid item - invalid unit price:', item);
       toast.error('Invalid unit price');
       return;
     }
     
-    // Ensure item has all required fields
+    // Ensure item has all required fields with proper calculations
     const completeItem: BillItem = {
       ...item,
       id: item.id || uuidv4(),
       productId: item.product.id,
-      subtotal: item.subtotal || (item.quantity * item.unitPrice),
-      total: item.total || (item.subtotal - (item.discountAmount || 0)),
+      unitPrice: unitPrice,
+      subtotal: item.subtotal || (item.quantity * unitPrice),
       discountAmount: item.discountAmount || 0,
+      total: item.total || ((item.quantity * unitPrice) - (item.discountAmount || 0)),
       taxAmount: item.taxAmount || 0,
       discountType: item.discountType || 'fixed',
       discountValue: item.discountValue || 0,
       discountPercentage: item.discountPercentage || 0,
       taxRate: item.taxRate || 0
     };
+    
+    // Validate calculated values
+    if (completeItem.subtotal <= 0) {
+      console.error('EnhancedBillingContext: Calculated subtotal is invalid:', completeItem);
+      toast.error('Invalid item calculation');
+      return;
+    }
     
     console.log('EnhancedBillingContext: Complete item to add:', completeItem);
     
@@ -435,27 +445,43 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
     
     console.log('Updating bill item at index:', index, item);
     
-    // Validate item data
+    // Enhanced validation for item data
     if (!item.product || !item.product.id) {
       console.error('Invalid item - missing product data:', item);
       toast.error('Invalid product data');
       return;
     }
     
-    // Ensure item has all required fields
+    // Enhanced unit price validation with fallbacks
+    const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+    if (unitPrice <= 0) {
+      console.error('Invalid unit price for item update:', item);
+      toast.error('Invalid unit price');
+      return;
+    }
+    
+    // Ensure item has all required fields with proper calculations
     const completeItem: BillItem = {
       ...item,
       id: item.id || uuidv4(),
       productId: item.product.id,
-      subtotal: item.subtotal || (item.quantity * item.unitPrice),
-      total: item.total || (item.subtotal - (item.discountAmount || 0)),
+      unitPrice: unitPrice,
+      subtotal: item.subtotal || (item.quantity * unitPrice),
       discountAmount: item.discountAmount || 0,
+      total: item.total || ((item.quantity * unitPrice) - (item.discountAmount || 0)),
       taxAmount: item.taxAmount || 0,
       discountType: item.discountType || 'fixed',
       discountValue: item.discountValue || 0,
       discountPercentage: item.discountPercentage || 0,
       taxRate: item.taxRate || 0
     };
+    
+    // Validate calculated values
+    if (completeItem.subtotal <= 0) {
+      console.error('Calculated subtotal is invalid for update:', completeItem);
+      toast.error('Invalid item calculation');
+      return;
+    }
     
     // Use functional update to ensure state consistency
     setCurrentBill(prevBill => {
@@ -580,24 +606,70 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
     try {
       console.log('Saving bill:', currentBill);
       
-      // Validate all items before saving
+      // Enhanced validation for all items before saving
       const invalidItems = currentBill.items.filter(item => 
-        !item.product || !item.product.id || !item.quantity || item.quantity <= 0 || !item.unitPrice || item.unitPrice <= 0
+        !item || 
+        !item.product || 
+        !item.product.id || 
+        !item.quantity || 
+        item.quantity <= 0 || 
+        (!item.unitPrice && !item.product.unitPrice && !item.product.price) ||
+        (item.unitPrice || item.product.unitPrice || item.product.price || 0) <= 0
       );
       
       if (invalidItems.length > 0) {
-        console.error('Invalid items found:', invalidItems);
-        throw new Error('Some items have invalid data. Please check all items.');
+        console.error('Invalid items found during save:', invalidItems);
+        throw new Error(`${invalidItems.length} items have invalid data. Please check all items and ensure they have valid products, quantities, and prices.`);
       }
       
+      // Validate bill totals
+      if (!currentBill.total || currentBill.total <= 0) {
+        console.error('Bill total is invalid:', currentBill.total);
+        throw new Error('Bill total is invalid. Please check item calculations.');
+      }
+      
+      // Ensure all items have proper structure for database storage
+      const validatedItems = currentBill.items.map((item, index) => {
+        const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+        const subtotal = item.subtotal || (item.quantity * unitPrice);
+        const total = item.total || (subtotal - (item.discountAmount || 0));
+        
+        return {
+          ...item,
+          unitPrice,
+          subtotal,
+          total,
+          discountAmount: item.discountAmount || 0,
+          taxAmount: item.taxAmount || 0,
+          discountType: item.discountType || 'fixed',
+          discountValue: item.discountValue || 0,
+          discountPercentage: item.discountPercentage || 0,
+          taxRate: item.taxRate || 0
+        };
+      });
+      
+      // Create validated bill object
       const billToSave = {
         ...currentBill,
+        items: validatedItems,
         notes: note || currentBill.note,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
       
-      console.log('Bill data being saved:', billToSave);
+      // Final validation log
+      console.log('Bill data being saved with validated items:', {
+        billNumber: billToSave.billNumber,
+        itemsCount: billToSave.items.length,
+        total: billToSave.total,
+        customer: billToSave.customer.name,
+        items: billToSave.items.map(item => ({
+          name: item.product.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.total
+        }))
+      });
       
       const result = await userDataService.createUserBill(billToSave);
       if (result.success && result.bill) {
@@ -605,7 +677,7 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
         setBills(newBills);
         setCurrentBill(null);
         await updateDataStats();
-        console.log('Bill saved successfully:', result.bill);
+        console.log('Bill saved successfully with validated data:', result.bill);
         toast.success('Bill saved successfully');
       } else {
         console.error('Failed to save bill:', result.message);

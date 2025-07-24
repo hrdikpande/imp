@@ -39,25 +39,44 @@ const BillHistory: React.FC = () => {
     const bill = bills.find(b => b.id === billId);
     if (!bill || !user) {
       console.error('Bill or user information not available', { bill: !!bill, user: !!user });
+      toast.error('Bill or user information is missing');
       return;
     }
     
-    // Validate bill data before processing
+    // Enhanced validation for bill data before processing
     if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      console.error('Bill has no items:', bill);
+      console.error('Bill has no items for PDF generation:', bill);
+      toast.error('This bill has no items. PDF cannot be generated.');
+      return;
+    }
+    
+    // Validate each item has required data
+    const invalidItems = bill.items.filter(item => 
+      !item || !item.product || !item.product.name || !item.quantity || item.quantity <= 0
+    );
+    
+    if (invalidItems.length > 0) {
+      console.error('Bill has invalid items for PDF:', invalidItems);
+      toast.error(`${invalidItems.length} items have invalid data. PDF cannot be generated.`);
       return;
     }
     
     console.log(`Downloading ${size} PDF for bill:`, bill.billNumber);
-    console.log('Bill items:', bill.items);
-    console.log('User info:', user);
+    console.log('Validated bill items for PDF:', bill.items.map(item => ({
+      name: item.product?.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice || item.product?.unitPrice || item.product?.price,
+      total: item.total
+    })));
     
     try {
       setIsGeneratingPDF(billId);
       await generateAndDownloadPDF(bill, user, 'download', size);
       setShowSizeOptions(null);
+      toast.success(`${size} PDF downloaded successfully`);
     } catch (error) {
       console.error('Error downloading PDF:', error);
+      toast.error(error instanceof Error ? error.message : `Failed to download ${size} PDF`);
     } finally {
       setIsGeneratingPDF(null);
     }
@@ -67,24 +86,44 @@ const BillHistory: React.FC = () => {
     const bill = bills.find(b => b.id === billId);
     if (!bill || !user) {
       console.error('Bill or user information not available', { bill: !!bill, user: !!user });
+      toast.error('Bill or user information is missing');
       return;
     }
     
-    // Validate bill data before processing
+    // Enhanced validation for bill data before processing
     if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      console.error('Bill has no items:', bill);
+      console.error('Bill has no items for PDF generation:', bill);
+      toast.error('This bill has no items. PDF cannot be generated.');
+      return;
+    }
+    
+    // Validate each item has required data
+    const invalidItems = bill.items.filter(item => 
+      !item || !item.product || !item.product.name || !item.quantity || item.quantity <= 0
+    );
+    
+    if (invalidItems.length > 0) {
+      console.error('Bill has invalid items for PDF:', invalidItems);
+      toast.error(`${invalidItems.length} items have invalid data. PDF cannot be generated.`);
       return;
     }
     
     console.log(`Printing ${size} PDF for bill:`, bill.billNumber);
-    console.log('Bill items:', bill.items);
+    console.log('Validated bill items for print:', bill.items.map(item => ({
+      name: item.product?.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice || item.product?.unitPrice || item.product?.price,
+      total: item.total
+    })));
     
     try {
       setIsGeneratingPDF(billId);
       await generateAndDownloadPDF(bill, user, 'print', size);
       setShowSizeOptions(null);
+      toast.success(`${size} print dialog opened`);
     } catch (error) {
       console.error('Error printing PDF:', error);
+      toast.error(error instanceof Error ? error.message : `Failed to print ${size} PDF`);
     } finally {
       setIsGeneratingPDF(null);
     }

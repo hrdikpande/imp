@@ -45,24 +45,44 @@ const ViewBill: React.FC = () => {
   const handleDownloadPDF = async (size: 'A4' | 'A5' = 'A5') => {
     if (!user) {
       console.error('User information not available');
+      toast.error('User information is missing');
       return;
     }
     
-    // Validate bill data
+    // Enhanced validation for bill data
     if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      console.error('Bill has no items to generate PDF');
+      console.error('Bill has no items to generate PDF:', bill);
+      toast.error('This bill has no items. PDF cannot be generated.');
+      return;
+    }
+    
+    // Validate each item has required data
+    const invalidItems = bill.items.filter(item => 
+      !item || !item.product || !item.product.name || !item.quantity || item.quantity <= 0
+    );
+    
+    if (invalidItems.length > 0) {
+      console.error('Bill has invalid items:', invalidItems);
+      toast.error(`${invalidItems.length} items have invalid data. PDF cannot be generated.`);
       return;
     }
     
     console.log(`Downloading ${size} PDF for bill:`, bill.billNumber);
-    console.log('Bill items:', bill.items);
+    console.log('Bill items for PDF:', bill.items.map(item => ({
+      name: item.product?.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice || item.product?.unitPrice || item.product?.price,
+      total: item.total
+    })));
     
     try {
       setIsGeneratingPDF(true);
       await generateAndDownloadPDF(bill, user, 'download', size);
       setShowSizeOptions(false);
+      toast.success(`${size} PDF downloaded successfully`);
     } catch (error) {
       console.error('Error downloading PDF:', error);
+      toast.error(error instanceof Error ? error.message : `Failed to download ${size} PDF`);
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -71,31 +91,61 @@ const ViewBill: React.FC = () => {
   const handlePrintPDF = async (size: 'A4' | 'A5' = 'A5') => {
     if (!user) {
       console.error('User information not available');
+      toast.error('User information is missing');
       return;
     }
     
-    // Validate bill data
+    // Enhanced validation for bill data
     if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      console.error('Bill has no items to generate PDF');
+      console.error('Bill has no items to generate PDF:', bill);
+      toast.error('This bill has no items. PDF cannot be generated.');
+      return;
+    }
+    
+    // Validate each item has required data
+    const invalidItems = bill.items.filter(item => 
+      !item || !item.product || !item.product.name || !item.quantity || item.quantity <= 0
+    );
+    
+    if (invalidItems.length > 0) {
+      console.error('Bill has invalid items:', invalidItems);
+      toast.error(`${invalidItems.length} items have invalid data. PDF cannot be generated.`);
       return;
     }
     
     console.log(`Printing ${size} PDF for bill:`, bill.billNumber);
-    console.log('Bill items:', bill.items);
+    console.log('Bill items for print:', bill.items.map(item => ({
+      name: item.product?.name,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice || item.product?.unitPrice || item.product?.price,
+      total: item.total
+    })));
     
     try {
       setIsGeneratingPDF(true);
       await generateAndDownloadPDF(bill, user, 'print', size);
       setShowSizeOptions(false);
+      toast.success(`${size} print dialog opened`);
     } catch (error) {
       console.error('Error printing PDF:', error);
+      toast.error(error instanceof Error ? error.message : `Failed to print ${size} PDF`);
     } finally {
       setIsGeneratingPDF(false);
     }
   };
 
-  // Check if bill has items for PDF generation
-  const canGeneratePDF = bill.items && Array.isArray(bill.items) && bill.items.length > 0;
+  // Enhanced check if bill has valid items for PDF generation
+  const canGeneratePDF = bill.items && 
+    Array.isArray(bill.items) && 
+    bill.items.length > 0 &&
+    bill.items.every(item => 
+      item && 
+      item.product && 
+      item.product.name && 
+      item.quantity && 
+      item.quantity > 0 &&
+      (item.unitPrice || item.product.unitPrice || item.product.price)
+    );
 
   return (
     <div className="space-y-6 animate-fade-in">

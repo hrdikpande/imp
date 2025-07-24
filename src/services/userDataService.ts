@@ -288,15 +288,15 @@ class UserDataService {
     try {
       console.log('Creating bill in database:', billData);
       
-      // Validate bill data
+      // Enhanced validation for bill data
       if (!billData.items || !Array.isArray(billData.items) || billData.items.length === 0) {
         return { success: false, message: 'Bill must have at least one item' };
       }
       
-      // Validate each item
+      // Enhanced validation for each item
       for (const item of billData.items) {
         if (!item.product || !item.product.id) {
-          return { success: false, message: 'All items must have valid product data' };
+          return { success: false, message: 'Found null or undefined item in bill' };
         }
         if (!item.quantity || item.quantity <= 0) {
           return { success: false, message: 'All items must have valid quantity' };
@@ -329,11 +329,24 @@ class UserDataService {
 
       console.log('Bill inserted, now inserting items:', billData.items);
 
-      // Insert bill items with validation
+      // Insert bill items with enhanced validation and error handling
       for (const item of billData.items) {
         if (!item.product || !item.product.id) {
           console.error('Invalid item - missing product:', item);
-          continue;
+          return { success: false, message: `Invalid item found during insertion: ${JSON.stringify(item)}` };
+        }
+        
+        // Calculate proper values with fallbacks
+        const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+        const subtotal = item.subtotal || (item.quantity * unitPrice);
+        const total = item.total || (subtotal - (item.discountAmount || 0));
+        
+        // Final validation before insertion
+        if (unitPrice <= 0 || subtotal <= 0 || total < 0) {
+          return { 
+            success: false, 
+            message: `Invalid calculations for item "${item.product.name}": unitPrice=${unitPrice}, subtotal=${subtotal}, total=${total}` 
+          };
         }
         
         const itemQuery = `
@@ -345,22 +358,42 @@ class UserDataService {
         `;
 
         const itemId = uuidv4();
-        await multiTenantDb.executeUpdate(userId, itemQuery, [
-          itemId, billId, item.product.id, item.quantity, item.unitPrice,
-          item.discountType || 'fixed', item.discountValue || 0,
-          item.discountPercentage || 0, item.discountAmount || 0,
-          item.taxRate || 0, item.taxAmount || 0, item.subtotal, item.total
-        ]);
         
-        console.log('Inserted bill item:', itemId, item.product.name);
+        try {
+          await multiTenantDb.executeUpdate(userId, itemQuery, [
+            itemId, billId, item.product.id, item.quantity, unitPrice,
+            item.discountType || 'fixed', item.discountValue || 0,
+            item.discountPercentage || 0, item.discountAmount || 0,
+            item.taxRate || 0, item.taxAmount || 0, subtotal, total
+          ]);
+          
+          console.log('Inserted bill item successfully:', {
+            itemId,
+            productName: item.product.name,
+            quantity: item.quantity,
+            unitPrice,
+            subtotal,
+            total
+          });
+        } catch (itemInsertError) {
+          console.error('Error inserting bill item:', itemInsertError, item);
+          return { 
+            success: false, 
+            message: `Failed to insert item "${item.product.name}": ${itemInsertError}` 
+          };
+        }
       }
 
       const bill = await this.getUserBillById(billId);
+      if (!bill) {
+        return { success: false, message: 'Bill was created but could not be retrieved for verification' };
+      }
+      
       console.log('Bill created successfully:', bill);
       return { success: true, message: 'Bill created successfully', bill: bill! };
     } catch (error) {
       console.error('Error creating user bill:', error);
-      return { success: false, message: 'Failed to create bill' };
+      return { success: false, message: `Failed to create bill: ${error instanceof Error ? error.message : 'Unknown error'}` };
     }
   }
 
@@ -446,11 +479,21 @@ class UserDataService {
             taxAmount: itemData.tax_amount || 0,
             subtotal: itemData.subtotal,
             total: itemData.total
-          };
+          return { success: false, message: `Item "${item.product.name}" has invalid quantity: ${item.quantity}` };
           items.push(billItem);
-          console.log('Loaded bill item:', billItem.product.name, billItem.quantity);
-        } else {
-          console.warn('Product not found for bill item:', itemData.product_id);
+          return { success: false, message: `Item "${item.product?.name || 'Unknown'}" is missing product information` };
+        // Enhanced unit price validation with fallbacks
+        const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+        if (unitPrice <= 0) {
+          return { success: false, message: `Item "${item.product.name}" has invalid unit price: ${unitPrice}` };
+        }
+        
+        // Validate calculated totals
+        const expectedSubtotal = item.quantity * unitPrice;
+        const expectedTotal = expectedSubtotal - (item.discountAmount || 0);
+        
+        if (expectedTotal <= 0) {
+          return { success: false, message: `Item "${item.product.name}" has invalid total after calculations: ${expectedTotal}` };
         }
       }
 
@@ -475,6 +518,11 @@ class UserDataService {
         createdAt: billData.created_at,
         updatedAt: billData.updated_at
       };
+      
+      // Validate bill totals
+      if (!billData.total || billData.total <= 0) {
+        return { success: false, message: `Bill total is invalid: ${billData.total}` };
+      }
       
       console.log(`Bill loaded: ${bill.billNumber} with ${bill.items.length} items`);
       return bill;

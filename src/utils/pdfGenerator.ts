@@ -9,19 +9,104 @@ declare module 'jspdf' {
   }
 }
 
-// Enhanced PDF generation with A5 size support
+// Helper functions for data validation and formatting
+const safeText = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+};
+
+const safeNumber = (value: any): number => {
+  if (value === null || value === undefined || isNaN(Number(value))) return 0;
+  return Number(value);
+};
+
+const formatCurrency = (amount: number): string => {
+  return amount.toFixed(2);
+};
+
+const formatINR = (amount: number): string => {
+  return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Validate bill data before PDF generation
+const validateBillData = (bill: Bill): { isValid: boolean; errors: string[] } => {
+  const errors: string[] = [];
+
+  if (!bill) {
+    errors.push('Bill data is missing');
+    return { isValid: false, errors };
+  }
+
+  if (!bill.billNumber) {
+    errors.push('Bill number is missing');
+  }
+
+  if (!bill.customer) {
+    errors.push('Customer information is missing');
+  } else {
+    if (!bill.customer.name) errors.push('Customer name is missing');
+    if (!bill.customer.phone) errors.push('Customer phone is missing');
+  }
+
+  if (!bill.items || !Array.isArray(bill.items)) {
+    errors.push('Bill items array is missing or invalid');
+  } else if (bill.items.length === 0) {
+    errors.push('Bill has no items');
+  } else {
+    // Validate each item
+    bill.items.forEach((item, index) => {
+      if (!item) {
+        errors.push(`Item ${index + 1} is null or undefined`);
+        return;
+      }
+
+      if (!item.product) {
+        errors.push(`Item ${index + 1} is missing product information`);
+      } else {
+        if (!item.product.name) {
+          errors.push(`Item ${index + 1} product name is missing`);
+        }
+        if (!item.product.code) {
+          errors.push(`Item ${index + 1} product code is missing`);
+        }
+      }
+
+      if (!item.quantity || item.quantity <= 0) {
+        errors.push(`Item ${index + 1} has invalid quantity`);
+      }
+
+      const unitPrice = item.unitPrice || item.product?.unitPrice || item.product?.price || 0;
+      if (unitPrice <= 0) {
+        errors.push(`Item ${index + 1} has invalid unit price`);
+      }
+    });
+  }
+
+  if (typeof bill.total !== 'number' || bill.total < 0) {
+    errors.push('Bill total is invalid');
+  }
+
+  return { isValid: errors.length === 0, errors };
+};
+
+// Enhanced A5 PDF generation with better error handling
 export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
   try {
-    // Validate input data
-    if (!bill || !businessInfo) {
-      throw new Error('Missing bill or business information');
+    console.log('Starting A5 PDF generation for bill:', bill.billNumber);
+    console.log('Bill items:', bill.items);
+
+    // Validate bill data first
+    const validation = validateBillData(bill);
+    if (!validation.isValid) {
+      console.error('Bill validation failed:', validation.errors);
+      throw new Error(`Bill validation failed: ${validation.errors.join(', ')}`);
     }
 
-    if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      throw new Error('No items found in the bill');
+    // Validate business info
+    if (!businessInfo) {
+      throw new Error('Business information is missing');
     }
 
-    // A5 dimensions: 148 × 210 mm (half of A4)
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -36,26 +121,7 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
 
     let yPosition = margin;
 
-    // Helper functions
-    const safeText = (value: any): string => {
-      if (value === null || value === undefined) return '';
-      return String(value).trim();
-    };
-
-    const safeNumber = (value: any): number => {
-      if (value === null || value === undefined || isNaN(Number(value))) return 0;
-      return Number(value);
-    };
-
-    const formatCurrency = (amount: number): string => {
-      return amount.toFixed(2);
-    };
-
-    const formatINR = (amount: number): string => {
-      return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
-
-    // Header Section - Tax Invoice
+    // Header Section
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -80,11 +146,11 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
       `Phone: ${safeText(businessInfo.phone)}`,
       `Email: ${safeText(businessInfo.email)}`,
       businessInfo.taxId ? `GSTIN: ${safeText(businessInfo.taxId)}` : ''
-    ];
+    ].filter(line => line.trim());
 
     let addressY = yPosition + 7;
     businessAddress.forEach(line => {
-      if (line.trim()) {
+      if (addressY < yPosition + 23) {
         doc.text(line, margin + 2, addressY);
         addressY += 2.5;
       }
@@ -98,7 +164,7 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
     const invoiceDetails = [
       ['Invoice No:', safeText(bill.billNumber)],
       ['Date:', new Date(bill.createdAt).toLocaleDateString('en-GB')],
-      ['Payment:', bill.paymentMode || 'Cash']
+      ['Payment:', safeText(bill.paymentMode) || 'Cash']
     ];
 
     let detailY = yPosition + 4;
@@ -125,11 +191,11 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
       bill.customer.email ? `Email: ${safeText(bill.customer.email)}` : '',
       bill.customer.address ? safeText(bill.customer.address) : '',
       bill.customer.gstin ? `GSTIN: ${safeText(bill.customer.gstin)}` : ''
-    ];
+    ].filter(line => line.trim());
 
     let custY = yPosition + 9;
     customerDetails.forEach(line => {
-      if (line.trim() && custY < yPosition + 14) {
+      if (custY < yPosition + 14) {
         doc.text(line, margin + 2, custY);
         custY += 2.5;
       }
@@ -160,25 +226,29 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
 
     yPosition += 8;
 
-    // Items Table Body
+    // Items Table Body - Enhanced with better validation
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6);
     let itemTotal = 0;
     let totalDiscount = 0;
 
-    console.log('Processing bill items for A5 PDF:', bill.items);
+    console.log('Processing bill items for A5 PDF:', bill.items.length, 'items');
 
-    // Process each item
+    // Process each item with enhanced error handling
     bill.items.forEach((item, index) => {
       try {
-        const rowHeight = 10;
-        currentX = margin;
+        if (!item) {
+          console.warn(`Skipping null item at index ${index}`);
+          return;
+        }
 
-        // Validate item data
-        if (!item || !item.product) {
+        if (!item.product) {
           console.warn(`Item ${index + 1} is missing product data:`, item);
           return;
         }
+
+        const rowHeight = 10;
+        currentX = margin;
 
         // Draw row border
         doc.rect(margin, yPosition, contentWidth, rowHeight);
@@ -189,7 +259,7 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
         // Item Name (truncated for A5)
-        const productName = safeText(item.product.name || '');
+        const productName = safeText(item.product.name);
         const maxNameLength = 25;
         const displayName = productName.length > maxNameLength 
           ? productName.substring(0, maxNameLength) + '...' 
@@ -197,7 +267,7 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
         doc.text(displayName, currentX + 1, yPosition + 4);
         
         // Product code on second line if space allows
-        const productCode = safeText(item.product.code || '');
+        const productCode = safeText(item.product.code);
         if (productCode) {
           doc.text(`Code: ${productCode}`, currentX + 1, yPosition + 7);
         }
@@ -205,25 +275,40 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
         currentX += colWidths[1];
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
-        // Quantity
+        // Quantity - Enhanced validation
         const quantity = safeNumber(item.quantity);
+        if (quantity <= 0) {
+          console.warn(`Item ${index + 1} has invalid quantity:`, item.quantity);
+        }
         doc.text(quantity.toString(), currentX + 1, yPosition + 6);
         currentX += colWidths[2];
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
-        // Rate (Unit Price)
+        // Rate (Unit Price) - Multiple fallbacks
         const unitPrice = safeNumber(
           item.unitPrice || 
           item.product.unitPrice || 
           item.product.price || 
           0
         );
+        if (unitPrice <= 0) {
+          console.warn(`Item ${index + 1} has invalid unit price:`, {
+            itemUnitPrice: item.unitPrice,
+            productUnitPrice: item.product.unitPrice,
+            productPrice: item.product.price
+          });
+        }
         doc.text(formatCurrency(unitPrice), currentX + 1, yPosition + 6);
         currentX += colWidths[3];
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
-        // Amount
-        const itemAmount = safeNumber(item.total || (quantity * unitPrice));
+        // Amount - Calculate if not provided
+        let itemAmount = safeNumber(item.total);
+        if (itemAmount <= 0) {
+          itemAmount = quantity * unitPrice;
+          console.log(`Calculated item amount for ${productName}: ${quantity} × ${unitPrice} = ${itemAmount}`);
+        }
+        
         doc.text(formatCurrency(itemAmount), currentX + 1, yPosition + 6);
         
         // Add to totals
@@ -232,8 +317,11 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
 
         yPosition += rowHeight;
         
+        console.log(`Processed item ${index + 1}: ${productName}, Qty: ${quantity}, Price: ${unitPrice}, Amount: ${itemAmount}`);
+        
       } catch (itemError) {
         console.error(`Error processing item ${index + 1}:`, itemError, item);
+        // Continue with next item instead of failing entire PDF
       }
     });
 
@@ -284,7 +372,13 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
     doc.setFontSize(8);
     doc.text('TOTAL', pageWidth - margin - 40, yPosition + 6);
     
-    const finalTotal = safeNumber(bill.total);
+    // Use calculated total if bill total is invalid
+    let finalTotal = safeNumber(bill.total);
+    if (finalTotal <= 0) {
+      finalTotal = itemTotal - totalDiscount - billDiscountAmount;
+      console.log(`Calculated final total: ${itemTotal} - ${totalDiscount} - ${billDiscountAmount} = ${finalTotal}`);
+    }
+    
     doc.text(formatINR(finalTotal), pageWidth - margin - 3, yPosition + 6, { align: 'right' });
 
     yPosition += totalRowHeight + 5;
@@ -360,19 +454,22 @@ export const generateA5BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
   }
 };
 
-// Generate A4 size PDF (existing functionality)
+// Generate A4 size PDF with enhanced validation
 export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
   try {
-    // Validate input data
-    if (!bill || !businessInfo) {
-      throw new Error('Missing bill or business information');
+    console.log('Starting A4 PDF generation for bill:', bill.billNumber);
+
+    // Validate bill data first
+    const validation = validateBillData(bill);
+    if (!validation.isValid) {
+      console.error('Bill validation failed:', validation.errors);
+      throw new Error(`Bill validation failed: ${validation.errors.join(', ')}`);
     }
 
-    if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      throw new Error('No items found in the bill');
+    if (!businessInfo) {
+      throw new Error('Business information is missing');
     }
 
-    // A4 dimensions: 210 × 297 mm
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -387,26 +484,7 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
 
     let yPosition = margin;
 
-    // Helper functions
-    const safeText = (value: any): string => {
-      if (value === null || value === undefined) return '';
-      return String(value).trim();
-    };
-
-    const safeNumber = (value: any): number => {
-      if (value === null || value === undefined || isNaN(Number(value))) return 0;
-      return Number(value);
-    };
-
-    const formatCurrency = (amount: number): string => {
-      return amount.toFixed(2);
-    };
-
-    const formatINR = (amount: number): string => {
-      return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    };
-
-    // Header Section - Tax Invoice
+    // Header Section
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
@@ -432,11 +510,11 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
       `State Name: ${safeText(businessInfo.state)}, Code: 09`,
       `Contact: ${safeText(businessInfo.phone)}`,
       `E-Mail: ${safeText(businessInfo.email)}`
-    ];
+    ].filter(line => line.trim());
 
     let addressY = yPosition + 10;
     businessAddress.forEach(line => {
-      if (line.trim()) {
+      if (addressY < yPosition + 28) {
         doc.text(line, margin + 3, addressY);
         addressY += 3.5;
       }
@@ -450,14 +528,7 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
     const invoiceDetails = [
       ['Invoice No.:', safeText(bill.billNumber)],
       ['Dated:', new Date(bill.createdAt).toLocaleDateString('en-GB')],
-      ['Delivery Note:', ''],
-      ['Mode/Terms of Payment:', bill.paymentMode || 'Cash'],
-      ['Reference No. & Date:', ''],
-      ['Other References:', ''],
-      ['Buyer\'s Order No.:', ''],
-      ['Dated:', ''],
-      ['Dispatch Doc No.:', ''],
-      ['Delivery Note Date:', '']
+      ['Mode/Terms of Payment:', safeText(bill.paymentMode) || 'Cash']
     ];
 
     let detailY = yPosition + 4;
@@ -487,34 +558,20 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
       `Phone: ${safeText(bill.customer.phone)}`,
       bill.customer.email ? `Email: ${safeText(bill.customer.email)}` : '',
       bill.customer.gstin ? `GSTIN/UIN: ${safeText(bill.customer.gstin)}` : ''
-    ];
+    ].filter(line => line.trim());
 
     let custY = yPosition + 12;
     customerDetails.forEach(line => {
-      if (line.trim()) {
+      if (custY < yPosition + 20) {
         doc.text(line, margin + 3, custY);
         custY += 3;
       }
     });
 
-    // Dispatch details on right
-    doc.text('Dispatched through', rightX, yPosition + 9);
-    doc.text('Destination', rightX, yPosition + 12);
-    doc.text('Terms of Delivery', rightX, yPosition + 15);
-
     yPosition += 25;
 
     // Items Table Header
-    const tableHeaders = [
-      'S.No.',
-      'Name',
-      'Code',
-      'Quantity',
-      'Price',
-      'Amount'
-    ];
-
-    // Calculate column widths
+    const tableHeaders = ['S.No.', 'Name', 'Code', 'Quantity', 'Price', 'Amount'];
     const colWidths = [18, 65, 30, 22, 25, 30];
     let currentX = margin;
 
@@ -536,25 +593,23 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
 
     yPosition += 10;
 
-    // Items Table Body
+    // Items Table Body with enhanced validation
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     let itemTotal = 0;
     let totalDiscount = 0;
 
-    console.log('Processing bill items for A4 PDF:', bill.items);
+    console.log('Processing bill items for A4 PDF:', bill.items.length, 'items');
 
-    // Process each item
     bill.items.forEach((item, index) => {
       try {
-        const rowHeight = 14;
-        currentX = margin;
-
-        // Validate item data
         if (!item || !item.product) {
-          console.warn(`Item ${index + 1} is missing product data:`, item);
+          console.warn(`Skipping invalid item at index ${index}:`, item);
           return;
         }
+
+        const rowHeight = 14;
+        currentX = margin;
 
         // Draw row border
         doc.rect(margin, yPosition, contentWidth, rowHeight);
@@ -565,7 +620,7 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
         // Name (Product Name)
-        const productName = safeText(item.product.name || '');
+        const productName = safeText(item.product.name);
         const maxNameLength = 30;
         const displayName = productName.length > maxNameLength 
           ? productName.substring(0, maxNameLength) + '...' 
@@ -575,7 +630,7 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
         // Code (Product Code)
-        const productCode = safeText(item.product.code || '');
+        const productCode = safeText(item.product.code);
         doc.text(productCode, currentX + 2, yPosition + 8);
         currentX += colWidths[2];
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
@@ -598,7 +653,10 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
         doc.line(currentX, yPosition, currentX, yPosition + rowHeight);
 
         // Amount (Total for this item)
-        const itemAmount = safeNumber(item.total || (quantity * unitPrice));
+        let itemAmount = safeNumber(item.total);
+        if (itemAmount <= 0) {
+          itemAmount = quantity * unitPrice;
+        }
         doc.text(formatCurrency(itemAmount), currentX + 2, yPosition + 8);
         
         // Add to totals
@@ -607,8 +665,10 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
 
         yPosition += rowHeight;
         
+        console.log(`Processed A4 item ${index + 1}: ${productName}, Amount: ${itemAmount}`);
+        
       } catch (itemError) {
-        console.error(`Error processing item ${index + 1}:`, itemError, item);
+        console.error(`Error processing A4 item ${index + 1}:`, itemError, item);
       }
     });
 
@@ -643,9 +703,6 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
       doc.setFontSize(9);
       doc.text('Less: Discount', margin + colWidths[0] + 2, yPosition + 6);
       
-      const discountPercent = bill.billDiscountType === 'percentage' ? `(${bill.billDiscountValue}%)` : '';
-      doc.text(discountPercent, pageWidth - margin - 60, yPosition + 6);
-      
       const totalDiscountAmount = totalDiscount + billDiscountAmount;
       doc.text(`(${formatCurrency(totalDiscountAmount)})`, pageWidth - margin - 5, yPosition + 6, { align: 'right' });
       
@@ -662,7 +719,11 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
     doc.setFontSize(11);
     doc.text('Total', pageWidth - margin - 90, yPosition + 8);
     
-    const finalTotal = safeNumber(bill.total);
+    let finalTotal = safeNumber(bill.total);
+    if (finalTotal <= 0) {
+      finalTotal = itemTotal - totalDiscount - billDiscountAmount;
+    }
+    
     doc.text(formatINR(finalTotal), pageWidth - margin - 5, yPosition + 8, { align: 'right' });
 
     yPosition += totalRowHeight + 8;
@@ -671,7 +732,6 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.text('Amount Chargeable (in words):', margin, yPosition);
-    doc.text('E. & O.E', pageWidth - margin - 25, yPosition);
     yPosition += 5;
 
     const amountInWords = `INR ${numberToWords(Math.floor(finalTotal))} Only`;
@@ -679,97 +739,10 @@ export const generateA4BillPDF = (bill: Bill, businessInfo: User): jsPDF => {
     doc.text(amountInWords, margin, yPosition);
     yPosition += 12;
 
-    // Tax breakdown table
-    const taxTableY = yPosition;
-    
-    const taxHeaders = ['HSN/SAC', 'Taxable Value', 'IGST Rate', 'IGST Amount', 'Total Tax Amount'];
-    const taxColWidths = [25, 35, 25, 30, 35];
-    
-    doc.setFillColor(240, 240, 240);
-    doc.rect(margin, taxTableY, 150, 8, 'F');
-    doc.rect(margin, taxTableY, 150, 8);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    
-    let taxX = margin;
-    taxHeaders.forEach((header, index) => {
-      doc.text(header, taxX + 1, taxTableY + 5);
-      if (index < taxHeaders.length - 1) {
-        doc.line(taxX + taxColWidths[index], taxTableY, taxX + taxColWidths[index], taxTableY + 8);
-      }
-      taxX += taxColWidths[index];
-    });
-
-    // Tax table body
-    const taxRowY = taxTableY + 8;
-    const taxRowHeight = 8;
-    
-    doc.rect(margin, taxRowY, 150, taxRowHeight);
-    doc.setFont('helvetica', 'normal');
-    
-    const taxableAmount = finalTotal;
-    const igstRate = 18;
-    const igstAmount = (taxableAmount * igstRate) / (100 + igstRate);
-    
-    taxX = margin;
-    const taxData = ['', formatCurrency(taxableAmount - igstAmount), `${igstRate}%`, formatCurrency(igstAmount), formatCurrency(igstAmount)];
-    
-    taxData.forEach((data, index) => {
-      doc.text(data, taxX + 1, taxRowY + 5);
-      if (index < taxData.length - 1) {
-        doc.line(taxX + taxColWidths[index], taxRowY, taxX + taxColWidths[index], taxRowY + taxRowHeight);
-      }
-      taxX += taxColWidths[index];
-    });
-
-    // Total tax row
-    const totalTaxY = taxRowY + taxRowHeight;
-    doc.setFillColor(240, 240, 240);
-    doc.rect(margin, totalTaxY, 150, taxRowHeight, 'F');
-    doc.rect(margin, totalTaxY, 150, taxRowHeight);
-    
-    doc.setFont('helvetica', 'bold');
-    doc.text('Total', margin + 1, totalTaxY + 5);
-    doc.text(formatCurrency(taxableAmount - igstAmount), margin + 60, totalTaxY + 5, { align: 'right' });
-    doc.text(formatCurrency(igstAmount), margin + 110, totalTaxY + 5, { align: 'right' });
-    doc.text(formatCurrency(igstAmount), margin + 150 - 5, totalTaxY + 5, { align: 'right' });
-
-    yPosition = totalTaxY + taxRowHeight + 12;
-
-    // Tax amount in words
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Tax Amount (in words):', margin, yPosition);
-    yPosition += 5;
-    
-    const taxAmountInWords = igstAmount > 0 
-      ? `INR ${numberToWords(Math.floor(igstAmount))} Only`
-      : 'INR Zero Only';
-    doc.setFont('helvetica', 'bold');
-    doc.text(taxAmountInWords, margin, yPosition);
-    yPosition += 12;
-
-    // Company bank details
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Company\'s Bank Details', margin, yPosition);
-    yPosition += 5;
-    
-    const bankDetails = [
-      `A/c Holder's Name: ${safeText(businessInfo.businessName)}`,
-      `Bank Name: ${safeText(businessInfo.bankName) || 'Bank Name'}`,
-      `A/c No.: ${safeText(businessInfo.accountNumber) || 'Account Number'}`,
-      `Branch & IFS Code: ${safeText(businessInfo.swiftCode) || 'IFSC Code'}`
-    ];
-
-    bankDetails.forEach(detail => {
-      doc.text(detail, margin, yPosition);
-      yPosition += 4;
-    });
-
     // Authorization signature
-    doc.text('for ' + safeText(businessInfo.businessName).toUpperCase(), pageWidth - margin - 70, yPosition - 8);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text('for ' + safeText(businessInfo.businessName).toUpperCase(), pageWidth - margin - 70, yPosition);
     yPosition += 12;
     doc.text('Authorised Signatory', pageWidth - margin - 70, yPosition);
 
@@ -825,18 +798,17 @@ function numberToWords(num: number): string {
 
   let result = '';
   
-  // Handle Indian numbering system
-  if (num >= 10000000) { // Crore
+  if (num >= 10000000) {
     result = convertHundreds(Math.floor(num / 10000000)) + 'Crore ';
     num %= 10000000;
   }
   
-  if (num >= 100000) { // Lakh
+  if (num >= 100000) {
     result += convertHundreds(Math.floor(num / 100000)) + 'Lakh ';
     num %= 100000;
   }
   
-  if (num >= 1000) { // Thousand
+  if (num >= 1000) {
     result += convertHundreds(Math.floor(num / 1000)) + 'Thousand ';
     num %= 1000;
   }
@@ -848,11 +820,10 @@ function numberToWords(num: number): string {
   return result.trim();
 }
 
-// Download PDF functions
+// Enhanced download and print functions with better error handling
 export const downloadBillPDF = async (bill: Bill, businessInfo: User, size: 'A4' | 'A5' = 'A5'): Promise<void> => {
   try {
     console.log(`Starting ${size} PDF download for bill:`, bill.billNumber);
-    console.log('Bill items:', bill.items);
     
     const doc = size === 'A5' ? generateA5BillPDF(bill, businessInfo) : generateA4BillPDF(bill, businessInfo);
     const fileName = `Invoice_${size}_${bill.billNumber || 'bill'}_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -861,7 +832,7 @@ export const downloadBillPDF = async (bill: Bill, businessInfo: User, size: 'A4'
     console.log(`${size} PDF downloaded successfully: ${fileName}`);
   } catch (error) {
     console.error(`Error downloading ${size} PDF:`, error);
-    throw new Error(`Failed to download ${size} PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw error;
   }
 };
 
@@ -904,7 +875,7 @@ export const generateAndDownloadPDF = async (
   size: 'A4' | 'A5' = 'A5'
 ): Promise<void> => {
   try {
-    // Validate inputs
+    // Enhanced validation
     if (!bill) {
       toast.error('Bill information is missing');
       throw new Error('Bill information is missing');
@@ -915,14 +886,21 @@ export const generateAndDownloadPDF = async (
       throw new Error('Business information is missing');
     }
     
-    if (!bill.items || !Array.isArray(bill.items) || bill.items.length === 0) {
-      toast.error('No items found in the bill');
-      throw new Error('No items found in the bill');
+    // Validate bill data
+    const validation = validateBillData(bill);
+    if (!validation.isValid) {
+      const errorMessage = `Bill validation failed: ${validation.errors.join(', ')}`;
+      toast.error(errorMessage);
+      throw new Error(errorMessage);
     }
     
     console.log(`Starting ${action} for ${size} bill:`, bill.billNumber);
-    console.log('Bill data:', bill);
-    console.log('Business data:', businessInfo);
+    console.log('Validated bill data:', {
+      billNumber: bill.billNumber,
+      itemsCount: bill.items?.length || 0,
+      total: bill.total,
+      customer: bill.customer?.name
+    });
     
     if (action === 'print') {
       const printSuccess = await printBillPDF(bill, businessInfo, size);
@@ -952,6 +930,3 @@ export const generateAndDownloadPDF = async (
     throw error;
   }
 };
-
-// Legacy function for backward compatibility
-export const generateA5BillPDFLegacy = generateA5BillPDF;

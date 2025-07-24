@@ -127,8 +127,14 @@ const BillItemForm: React.FC<BillItemFormProps> = ({
       return;
     }
 
-    // Validate unit price
-    if (!unitPrice || unitPrice <= 0) {
+    // Enhanced unit price validation with fallbacks
+    const finalUnitPrice = unitPrice || product.unitPrice || product.price || 0;
+    if (finalUnitPrice <= 0) {
+      console.error('BillItemForm: No valid unit price found:', {
+        itemUnitPrice: unitPrice,
+        productUnitPrice: product.unitPrice,
+        productPrice: product.price
+      });
       toast.error('Product must have a valid price');
       return;
     }
@@ -136,22 +142,33 @@ const BillItemForm: React.FC<BillItemFormProps> = ({
     try {
       setIsSubmitting(true);
 
-      // Create complete bill item with all required fields
+      // Create complete bill item with all required fields and proper calculations
+      const calculatedSubtotal = calculateItemSubtotal(finalUnitPrice, quantity);
+      const calculatedDiscountAmount = calculateItemDiscount(calculatedSubtotal, discountType, discountValue);
+      const calculatedTotal = calculateItemTotal(calculatedSubtotal, calculatedDiscountAmount);
+      
       const billItem: BillItem = {
         id: existingItem?.id || `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         product,
         productId: product.id,
         quantity,
-        unitPrice,
+        unitPrice: finalUnitPrice,
         discountType,
         discountValue,
         discountPercentage: discountType === 'percentage' ? discountValue : 0,
-        discountAmount,
+        discountAmount: calculatedDiscountAmount,
         taxRate: product.taxRate || 0,
         taxAmount: 0, // Calculate if needed
-        subtotal,
-        total,
+        subtotal: calculatedSubtotal,
+        total: calculatedTotal,
       };
+      
+      // Final validation before submission
+      if (billItem.subtotal <= 0 || billItem.total < 0) {
+        console.error('BillItemForm: Invalid calculations:', billItem);
+        toast.error('Invalid item calculations. Please check the values.');
+        return;
+      }
 
       console.log('BillItemForm: Submitting bill item:', billItem);
       
@@ -160,7 +177,7 @@ const BillItemForm: React.FC<BillItemFormProps> = ({
 
     } catch (error) {
       console.error('BillItemForm: Error in onSave:', error);
-      toast.error('Failed to save item');
+      toast.error(error instanceof Error ? error.message : 'Failed to save item');
     } finally {
       setIsSubmitting(false);
     }
