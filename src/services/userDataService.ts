@@ -479,9 +479,11 @@ class UserDataService {
             taxAmount: itemData.tax_amount || 0,
             subtotal: itemData.subtotal,
             total: itemData.total
+          }
           return { success: false, message: `Item "${item.product.name}" has invalid quantity: ${item.quantity}` };
           items.push(billItem);
           return { success: false, message: `Item "${item.product?.name || 'Unknown'}" is missing product information` };
+        }
         // Enhanced unit price validation with fallbacks
         const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
         if (unitPrice <= 0) {
