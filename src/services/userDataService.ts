@@ -560,19 +560,24 @@ class UserDataService {
       }
 
       // Get bill items
+      console.log(`Loading bill items for bill ${billData.bill_number} (ID: ${billData.id})`);
       const itemResults = await multiTenantDb.executeQueryAll(
         userId,
         'SELECT * FROM bill_items WHERE bill_id = ?',
         [billData.id]
       );
       
-      console.log(`Loading bill ${billData.bill_number} with ${itemResults.length} items`);
+      console.log(`Found ${itemResults.length} bill items in database for bill ${billData.bill_number}`);
+      console.log('Raw bill items data:', itemResults);
       
       const items = [];
       for (const itemData of itemResults) {
+        console.log(`Processing bill item:`, itemData);
+        
         // Try to get active product first, then try any product (including inactive)
         let product = await this.getUserProductById(itemData.product_id);
         if (!product) {
+          console.log(`Active product not found for ID: ${itemData.product_id}, trying inactive products`);
           // If active product not found, try to get any product (including inactive)
           const productResult = await multiTenantDb.executeQuery(
             userId,
@@ -581,6 +586,9 @@ class UserDataService {
           );
           if (productResult && productResult.id) {
             product = this.mapProductFromDb(productResult);
+            console.log(`Found inactive product:`, product.name);
+          } else {
+            console.error(`Product not found at all for ID: ${itemData.product_id}`);
           }
         }
         
@@ -600,11 +608,16 @@ class UserDataService {
             subtotal: itemData.subtotal,
             total: itemData.total
           };
+          console.log(`Successfully created bill item:`, billItem);
           items.push(billItem);
         } else {
-          console.warn(`Product not found for bill item: ${itemData.product_id} in bill: ${billData.bill_number}`);
+          console.error(`CRITICAL: Product not found for bill item: ${itemData.product_id} in bill: ${billData.bill_number}`);
+          console.error(`This will cause the item to be missing from the bill display`);
         }
       }
+
+      console.log(`Final items array for bill ${billData.bill_number}:`, items);
+      console.log(`Items count: ${items.length}`);
 
       const bill: Bill = {
         id: billData.id,
@@ -634,7 +647,10 @@ class UserDataService {
         return null;
       }
       
-      console.log(`Bill loaded: ${bill.billNumber} with ${bill.items.length} items`);
+      console.log(`FINAL BILL OBJECT: ${bill.billNumber} with ${bill.items.length} items`);
+      if (bill.items.length === 0) {
+        console.error(`WARNING: Bill ${bill.billNumber} has no items! This may indicate a data retrieval problem.`);
+      }
       return bill;
     } catch (error) {
       console.error('Error getting bill with details:', error);
