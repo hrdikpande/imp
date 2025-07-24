@@ -480,22 +480,7 @@ class UserDataService {
             subtotal: itemData.subtotal,
             total: itemData.total
           }
-          return { success: false, message: `Item "${item.product.name}" has invalid quantity: ${item.quantity}` };
           items.push(billItem);
-          return { success: false, message: `Item "${item.product?.name || 'Unknown'}" is missing product information` };
-        }
-        // Enhanced unit price validation with fallbacks
-        const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
-        if (unitPrice <= 0) {
-          return { success: false, message: `Item "${item.product.name}" has invalid unit price: ${unitPrice}` };
-        }
-        
-        // Validate calculated totals
-        const expectedSubtotal = item.quantity * unitPrice;
-        const expectedTotal = expectedSubtotal - (item.discountAmount || 0);
-        
-        if (expectedTotal <= 0) {
-          return { success: false, message: `Item "${item.product.name}" has invalid total after calculations: ${expectedTotal}` };
         }
       }
 
