@@ -514,7 +514,7 @@ class UserDataService {
     
     try {
       // Get customer
-      const customer = await this.getUserCustomerById(billData.customer_id);
+      let customer = await this.getUserCustomerById(billData.customer_id);
       if (!customer) {
         console.error('Customer not found for bill:', billData.id, 'customer_id:', billData.customer_id);
         // Try to get customer from any active customers if the specific one is not found
