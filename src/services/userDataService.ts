@@ -533,7 +533,7 @@ class UserDataService {
       // Get customer (including inactive ones for historical bills)
       let customer = await this._getAnyCustomerById(billData.customer_id);
       if (!customer) {
-        console.error('Customer not found for bill:', billData.id, 'customer_id:', billData.customer_id);
+        console.warn('Customer not found for bill:', billData.id, 'customer_id:', billData.customer_id);
         return null;
       }
 
