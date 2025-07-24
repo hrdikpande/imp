@@ -245,6 +245,30 @@ class UserDataService {
     const userId = this.getCurrentUserId();
     
     try {
+      // First, get all bills for this customer
+      const customerBills = await multiTenantDb.executeQueryAll(
+        userId,
+        'SELECT id FROM bills WHERE customer_id = ?',
+        [customerId]
+      );
+
+      // Delete all bill items for these bills
+      for (const bill of customerBills) {
+        await multiTenantDb.executeUpdate(
+          userId,
+          'DELETE FROM bill_items WHERE bill_id = ?',
+          [bill.id]
+        );
+      }
+
+      // Delete all bills for this customer
+      await multiTenantDb.executeUpdate(
+        userId,
+        'DELETE FROM bills WHERE customer_id = ?',
+        [customerId]
+      );
+
+      // Finally, mark the customer as inactive
       await multiTenantDb.executeUpdate(
         userId,
         'UPDATE customers SET is_active = 0, updated_at = ? WHERE id = ?',
