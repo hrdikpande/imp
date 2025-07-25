@@ -151,6 +151,9 @@ export class EnhancedDatabaseManager {
   }
 
   private async createUserTables(db: any): Promise<void> {
+    // Enable foreign key constraints
+    db.run('PRAGMA foreign_keys = ON;');
+
     const tables = [
       // Products table
       `CREATE TABLE IF NOT EXISTS products (
