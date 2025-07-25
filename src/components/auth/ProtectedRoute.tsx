@@ -1,13 +1,13 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useEnhancedAuth } from '../../context/EnhancedAuthContext';
+import { useSecureAuth } from '../../context/SecureAuthContext';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useEnhancedAuth();
+  const { isAuthenticated, isLoading } = useSecureAuth();
 
   if (isLoading) {
     return (

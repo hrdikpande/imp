@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
 import { Plus, Upload, Package } from 'lucide-react';
 import ProductsTable from '../components/ProductsTable';
 import ProductForm from '../components/ProductForm';
@@ -9,7 +9,7 @@ import { Product } from '../types';
 import toast from 'react-hot-toast';
 
 const Products: React.FC = () => {
-  const { products, addProduct, updateProduct, deleteProduct, bulkAddProducts } = useEnhancedBilling();
+  const { products, addProduct, updateProduct, deleteProduct, bulkAddProducts } = useSecureBilling();
   
   const [activeTab, setActiveTab] = useState<'products' | 'stock'>('products');
   const [showAddForm, setShowAddForm] = useState(false);

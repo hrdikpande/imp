@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
 import { Plus, UserPlus, FileCheck, ArrowLeft, Percent } from 'lucide-react';
 import CustomersList from '../components/CustomersList';
 import CustomerForm from '../components/CustomerForm';
@@ -28,7 +28,6 @@ const NewBill: React.FC = () => {
     updateBillDiscount,
     saveBill,
     clearCurrentBill
-  } = useEnhancedBilling();
   
   // UI State Management
   const [showAddCustomer, setShowAddCustomer] = useState(false);

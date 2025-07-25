@@ -1,32 +1,61 @@
+// Enhanced Authentication Service with Security Features
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
-import { User, AuthState } from '../types';
+import { User } from '../types';
 import { executeQuery, executeQueryAll, executeUpdate } from '../database/sqlite';
-import { userDataService } from './userDataService';
-import { multiTenantDb } from '../database/multiTenantDb';
+import { secureUserDataService } from './secureUserDataService';
+import { enhancedDb } from '../lib/database';
+import { security } from '../lib/security';
+import { validator } from '../lib/validation';
+import { errorHandler } from '../lib/errorHandler';
+import { logger } from '../lib/logger';
+import { SECURITY_CONFIG, ERROR_CODES } from '../config/constants';
 
-interface AuthToken {
-  token: string;
-  userId: string;
-  expiresAt: number;
-  isLongLived: boolean;
+interface AuthResult {
+  success: boolean;
+  message: string;
+  user?: User;
+  token?: string;
 }
 
-class EnhancedAuthService {
+class SecureAuthService {
   private currentUser: User | null = null;
   private token: string | null = null;
   private refreshTokenInterval: NodeJS.Timeout | null = null;
 
-  async register(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'> & { password: string }): Promise<{ success: boolean; message: string; user?: User }> {
+  async register(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'> & { password: string }): Promise<AuthResult> {
     try {
-      // Check if user already exists
-      const existingUser = await this.getUserByEmail(userData.email);
-      if (existingUser) {
-        return { success: false, message: 'User already exists with this email' };
+      // Validate user data
+      const validation = validator.validateUser(userData);
+      if (!validation.isValid) {
+        return { 
+          success: false, 
+          message: validation.errors.join(', ') 
+        };
       }
 
-      // Hash password
-      const hashedPassword = await bcrypt.hash(userData.password, 12);
+      const sanitizedData = validation.sanitizedValue;
+
+      // Check if user already exists
+      const existingUser = await this.getUserByEmail(sanitizedData.email);
+      if (existingUser) {
+        security.logSecurityEvent('REGISTRATION_ATTEMPT_DUPLICATE_EMAIL', { email: sanitizedData.email });
+        return { 
+          success: false, 
+          message: 'User already exists with this email' 
+        };
+      }
+
+      // Validate password strength
+      if (!this.validatePasswordStrength(userData.password)) {
+        return { 
+          success: false, 
+          message: `Password must be at least ${SECURITY_CONFIG.PASSWORD_MIN_LENGTH} characters long and contain uppercase, lowercase, number, and special character` 
+        };
+      }
+
+      // Hash password with high cost factor
+      const hashedPassword = await bcrypt.hash(userData.password, 14);
       
       const userId = uuidv4();
       const now = Date.now();
@@ -41,13 +70,32 @@ class EnhancedAuthService {
       `;
 
       await executeUpdate(query, [
-        userId, userData.email, hashedPassword, userData.businessName, userData.contactPerson,
-        userData.phone, userData.secondaryPhone || null, userData.website || null,
-        userData.businessRegNumber || null, userData.taxId || null, userData.businessType || null,
-        userData.address, userData.city, userData.state, userData.zipCode, userData.country,
-        userData.billingAddress || null, userData.bankName || null, userData.bankBranch || null,
-        userData.accountNumber || null, userData.swiftCode || null, userData.paymentTerms || null,
-        JSON.stringify(userData.acceptedPaymentMethods || []), userData.logoUrl || null, now, now
+        userId,
+        sanitizedData.email,
+        hashedPassword,
+        sanitizedData.businessName,
+        sanitizedData.contactPerson,
+        sanitizedData.phone,
+        sanitizedData.secondaryPhone || null,
+        sanitizedData.website || null,
+        sanitizedData.businessRegNumber || null,
+        sanitizedData.taxId || null,
+        sanitizedData.businessType || null,
+        sanitizedData.address,
+        sanitizedData.city,
+        sanitizedData.state,
+        sanitizedData.zipCode,
+        sanitizedData.country,
+        sanitizedData.billingAddress || null,
+        sanitizedData.bankName || null,
+        sanitizedData.bankBranch || null,
+        sanitizedData.accountNumber || null,
+        sanitizedData.swiftCode || null,
+        sanitizedData.paymentTerms || null,
+        JSON.stringify(sanitizedData.acceptedPaymentMethods || []),
+        sanitizedData.logoUrl || null,
+        now,
+        now
       ]);
 
       // Initialize user's database
@@ -56,28 +104,57 @@ class EnhancedAuthService {
       const user = await this.getUserById(userId);
       
       // Log registration
-      await this.logAuditEvent(userId, 'USER_REGISTERED', 'users', userId, null, user);
+      await this.logAuditEvent(userId, 'USER_REGISTERED', 'users', userId, null, { email: sanitizedData.email });
       
-      return { success: true, message: 'Registration successful', user };
+      logger.info('User registered successfully', { userId, email: sanitizedData.email });
+      
+      return { 
+        success: true, 
+        message: 'Registration successful', 
+        user 
+      };
     } catch (error) {
-      console.error('Registration error:', error);
-      return { success: false, message: 'Registration failed' };
+      logger.error('Registration error', error);
+      return { 
+        success: false, 
+        message: 'Registration failed' 
+      };
     }
   }
 
-  async login(email: string, password: string, rememberMe: boolean = false): Promise<{ success: boolean; message: string; user?: User; token?: string }> {
+  async login(email: string, password: string, rememberMe: boolean = false): Promise<AuthResult> {
     try {
-      const user = await this.getUserByEmail(email);
-      if (!user) {
-        await this.logFailedLogin(email, 'User not found');
-        return { success: false, message: 'Invalid email or password' };
+      const sanitizedEmail = security.sanitizeInput(email.toLowerCase());
+      
+      // Check rate limiting
+      if (!security.checkLoginAttempts(sanitizedEmail)) {
+        security.logSecurityEvent('LOGIN_RATE_LIMITED', { email: sanitizedEmail });
+        return { 
+          success: false, 
+          message: 'Too many login attempts. Please try again later.' 
+        };
       }
 
-      const userData = await this.getUserWithPassword(email);
-      if (!userData || !await bcrypt.compare(password, userData.password)) {
-        await this.logFailedLogin(email, 'Invalid password');
-        return { success: false, message: 'Invalid email or password' };
+      const user = await this.getUserByEmail(sanitizedEmail);
+      if (!user) {
+        await this.logFailedLogin(sanitizedEmail, 'User not found');
+        return { 
+          success: false, 
+          message: 'Invalid email or password' 
+        };
       }
+
+      const userData = await this.getUserWithPassword(sanitizedEmail);
+      if (!userData || !await bcrypt.compare(password, userData.password)) {
+        await this.logFailedLogin(sanitizedEmail, 'Invalid password');
+        return { 
+          success: false, 
+          message: 'Invalid email or password' 
+        };
+      }
+
+      // Reset login attempts on successful login
+      security.resetLoginAttempts(sanitizedEmail);
 
       // Create session token
       const token = await this.createAuthToken(user.id, rememberMe);
@@ -85,7 +162,7 @@ class EnhancedAuthService {
       // Set current user context
       this.currentUser = user;
       this.token = token;
-      userDataService.setCurrentUser(user.id);
+      secureUserDataService.setCurrentUser(user.id);
 
       // Store in localStorage with encryption
       const authData = {
@@ -95,8 +172,11 @@ class EnhancedAuthService {
         loginTime: Date.now()
       };
       
-      localStorage.setItem('auth_data', this.encryptData(JSON.stringify(authData)));
-      localStorage.setItem('user_data', this.encryptData(JSON.stringify(user)));
+      const encryptedAuthData = await security.encryptData(JSON.stringify(authData));
+      const encryptedUserData = await security.encryptData(JSON.stringify(user));
+      
+      localStorage.setItem('auth_data', encryptedAuthData);
+      localStorage.setItem('user_data', encryptedUserData);
 
       // Set up token refresh for long-lived tokens
       if (rememberMe) {
@@ -106,10 +186,20 @@ class EnhancedAuthService {
       // Log successful login
       await this.logAuditEvent(user.id, 'USER_LOGIN', 'users', user.id, null, { loginTime: Date.now() });
 
-      return { success: true, message: 'Login successful', user, token };
+      logger.info('User logged in successfully', { userId: user.id, email: sanitizedEmail });
+
+      return { 
+        success: true, 
+        message: 'Login successful', 
+        user, 
+        token 
+      };
     } catch (error) {
-      console.error('Login error:', error);
-      return { success: false, message: 'Login failed' };
+      logger.error('Login error', error);
+      return { 
+        success: false, 
+        message: 'Login failed' 
+      };
     }
   }
 
@@ -121,6 +211,8 @@ class EnhancedAuthService {
         
         // Log logout
         await this.logAuditEvent(this.currentUser.id, 'USER_LOGOUT', 'users', this.currentUser.id, null, { logoutTime: Date.now() });
+        
+        logger.info('User logged out successfully', { userId: this.currentUser.id });
       }
       
       // Clear refresh interval
@@ -132,20 +224,20 @@ class EnhancedAuthService {
       // Clear context
       this.currentUser = null;
       this.token = null;
-      userDataService.clearCurrentUser();
+      secureUserDataService.clearCurrentUser();
       
       // Clear storage
       localStorage.removeItem('auth_data');
       localStorage.removeItem('user_data');
       
     } catch (error) {
-      console.error('Logout error:', error);
+      logger.error('Logout error', error);
     }
   }
 
   async validateSession(token?: string): Promise<User | null> {
     try {
-      const authToken = token || this.getStoredToken();
+      const authToken = token || await this.getStoredToken();
       if (!authToken) return null;
 
       const session = await executeQuery(
@@ -162,7 +254,7 @@ class EnhancedAuthService {
       if (user) {
         this.currentUser = user;
         this.token = authToken;
-        userDataService.setCurrentUser(user.id);
+        secureUserDataService.setCurrentUser(user.id);
         
         // Refresh token if it's close to expiry
         await this.refreshTokenIfNeeded(authToken);
@@ -170,7 +262,7 @@ class EnhancedAuthService {
 
       return user;
     } catch (error) {
-      console.error('Session validation error:', error);
+      logger.error('Session validation error', error);
       await this.clearInvalidSession();
       return null;
     }
@@ -181,7 +273,7 @@ class EnhancedAuthService {
       return this.currentUser;
     }
 
-    const authToken = this.getStoredToken();
+    const authToken = await this.getStoredToken();
     if (authToken) {
       return await this.validateSession(authToken);
     }
@@ -189,8 +281,19 @@ class EnhancedAuthService {
     return null;
   }
 
-  async updateProfile(userId: string, updates: Partial<User>): Promise<{ success: boolean; message: string; user?: User }> {
+  async updateProfile(userId: string, updates: Partial<User>): Promise<AuthResult> {
     try {
+      const sanitizedUserId = security.sanitizeInput(userId);
+      
+      // Validate updates
+      const validation = validator.validateUser({ ...updates, id: userId });
+      if (!validation.isValid) {
+        return { 
+          success: false, 
+          message: validation.errors.join(', ') 
+        };
+      }
+
       const setClause = [];
       const values = [];
 
@@ -198,41 +301,66 @@ class EnhancedAuthService {
         if (value !== undefined && key !== 'id' && key !== 'createdAt') {
           const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
           setClause.push(`${dbKey} = ?`);
-          values.push(typeof value === 'object' ? JSON.stringify(value) : value);
+          const sanitizedValue = typeof value === 'string' ? security.sanitizeInput(value) : value;
+          values.push(typeof sanitizedValue === 'object' ? JSON.stringify(sanitizedValue) : sanitizedValue);
         }
       });
 
       if (setClause.length === 0) {
-        return { success: false, message: 'No valid updates provided' };
+        return { 
+          success: false, 
+          message: 'No valid updates provided' 
+        };
       }
 
       values.push(Date.now()); // updated_at
-      values.push(userId);
+      values.push(sanitizedUserId);
 
       const query = `UPDATE users SET ${setClause.join(', ')}, updated_at = ? WHERE id = ?`;
       await executeUpdate(query, values);
 
-      const user = await this.getUserById(userId);
+      const user = await this.getUserById(sanitizedUserId);
       if (user) {
         this.currentUser = user;
-        localStorage.setItem('user_data', this.encryptData(JSON.stringify(user)));
+        const encryptedUserData = await security.encryptData(JSON.stringify(user));
+        localStorage.setItem('user_data', encryptedUserData);
         
         // Log profile update
-        await this.logAuditEvent(userId, 'PROFILE_UPDATED', 'users', userId, null, updates);
+        await this.logAuditEvent(sanitizedUserId, 'PROFILE_UPDATED', 'users', sanitizedUserId, null, updates);
+        
+        logger.info('Profile updated successfully', { userId: sanitizedUserId });
       }
 
-      return { success: true, message: 'Profile updated successfully', user };
+      return { 
+        success: true, 
+        message: 'Profile updated successfully', 
+        user 
+      };
     } catch (error) {
-      console.error('Update profile error:', error);
-      return { success: false, message: 'Failed to update profile' };
+      logger.error('Update profile error', error);
+      return { 
+        success: false, 
+        message: 'Failed to update profile' 
+      };
     }
   }
 
+  private validatePasswordStrength(password: string): boolean {
+    if (password.length < SECURITY_CONFIG.PASSWORD_MIN_LENGTH) return false;
+    
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumbers = /\d/.test(password);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+    
+    return hasUppercase && hasLowercase && hasNumbers && hasSpecialChar;
+  }
+
   private async createAuthToken(userId: string, isLongLived: boolean): Promise<string> {
-    const token = uuidv4() + '-' + Date.now();
+    const token = security.generateSecureToken();
     const expiresAt = isLongLived 
-      ? Date.now() + (30 * 24 * 60 * 60 * 1000) // 30 days
-      : Date.now() + (24 * 60 * 60 * 1000); // 1 day
+      ? Date.now() + SECURITY_CONFIG.LONG_SESSION_TIMEOUT
+      : Date.now() + SECURITY_CONFIG.SESSION_TIMEOUT;
 
     await executeUpdate(
       'INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -258,7 +386,7 @@ class EnhancedAuthService {
 
       // Refresh if less than 1 day remaining
       if (timeUntilExpiry < oneDayInMs) {
-        const newExpiresAt = Date.now() + (30 * 24 * 60 * 60 * 1000); // Extend by 30 days
+        const newExpiresAt = Date.now() + SECURITY_CONFIG.LONG_SESSION_TIMEOUT;
         await executeUpdate(
           'UPDATE sessions SET expires_at = ? WHERE token = ?',
           [newExpiresAt, token]
@@ -274,16 +402,16 @@ class EnhancedAuthService {
     }, 60 * 60 * 1000);
   }
 
-  private getStoredToken(): string | null {
+  private async getStoredToken(): Promise<string | null> {
     try {
       const authData = localStorage.getItem('auth_data');
       if (authData) {
-        const decrypted = this.decryptData(authData);
+        const decrypted = await security.decryptData(authData);
         const parsed = JSON.parse(decrypted);
         return parsed.token;
       }
     } catch (error) {
-      console.error('Error getting stored token:', error);
+      logger.error('Error getting stored token', error);
     }
     return null;
   }
@@ -293,16 +421,16 @@ class EnhancedAuthService {
     localStorage.removeItem('user_data');
     this.currentUser = null;
     this.token = null;
-    userDataService.clearCurrentUser();
+    secureUserDataService.clearCurrentUser();
   }
 
   private async initializeUserDatabase(userId: string): Promise<void> {
     try {
       // This will create the user's database if it doesn't exist
-      await multiTenantDb.getUserDatabase(userId);
-      console.log(`Initialized database for user: ${userId}`);
+      await enhancedDb.getUserDatabase(userId);
+      logger.info('User database initialized', { userId });
     } catch (error) {
-      console.error('Error initializing user database:', error);
+      logger.error('Error initializing user database', error, { userId });
     }
   }
 
@@ -316,7 +444,7 @@ class EnhancedAuthService {
       if (!result || !result.id) return null;
       return this.mapUserFromDb(result);
     } catch (error) {
-      console.error('Get user by email error:', error);
+      logger.error('Get user by email error', error);
       return null;
     }
   }
@@ -328,7 +456,7 @@ class EnhancedAuthService {
         [email]
       );
     } catch (error) {
-      console.error('Get user with password error:', error);
+      logger.error('Get user with password error', error);
       return null;
     }
   }
@@ -343,7 +471,7 @@ class EnhancedAuthService {
       if (!result || !result.id) return null;
       return this.mapUserFromDb(result);
     } catch (error) {
-      console.error('Get user by ID error:', error);
+      logger.error('Get user by ID error', error);
       return null;
     }
   }
@@ -394,7 +522,7 @@ class EnhancedAuthService {
         ]
       );
     } catch (error) {
-      console.error('Error logging audit event:', error);
+      logger.error('Error logging audit event', error);
     }
   }
 
@@ -413,25 +541,15 @@ class EnhancedAuthService {
         ]
       );
     } catch (error) {
-      console.error('Error logging failed login:', error);
+      logger.error('Error logging failed login', error);
     }
-  }
-
-  private encryptData(data: string): string {
-    // Simple base64 encoding for demo - in production use proper encryption
-    return btoa(data);
-  }
-
-  private decryptData(encryptedData: string): string {
-    // Simple base64 decoding for demo - in production use proper decryption
-    return atob(encryptedData);
   }
 
   async cleanupExpiredSessions(): Promise<void> {
     try {
       await executeUpdate('DELETE FROM sessions WHERE expires_at < ?', [Date.now()]);
     } catch (error) {
-      console.error('Cleanup sessions error:', error);
+      logger.error('Cleanup sessions error', error);
     }
   }
 
@@ -443,7 +561,7 @@ class EnhancedAuthService {
       );
       return result?.count || 0;
     } catch (error) {
-      console.error('Error getting active sessions count:', error);
+      logger.error('Error getting active sessions count', error);
       return 0;
     }
   }
@@ -451,11 +569,12 @@ class EnhancedAuthService {
   async revokeAllSessions(userId: string): Promise<void> {
     try {
       await executeUpdate('DELETE FROM sessions WHERE user_id = ?', [userId]);
+      logger.info('All sessions revoked', { userId });
     } catch (error) {
-      console.error('Error revoking all sessions:', error);
+      logger.error('Error revoking all sessions', error);
     }
   }
 }
 
-export const enhancedAuthService = new EnhancedAuthService();
-export default enhancedAuthService;
+export const secureAuthService = new SecureAuthService();
+export default secureAuthService;

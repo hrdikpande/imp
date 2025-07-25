@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
-import { useEnhancedAuth } from '../context/EnhancedAuthContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
+import { useSecureAuth } from '../context/SecureAuthContext';
 import { ArrowLeft, Printer, FileText, Trash2, Download, FileDown } from 'lucide-react';
 import BillItemsTable from '../components/BillItemsTable';
 import { formatCurrency, formatDateTime } from '../utils/calculations';
@@ -10,8 +10,8 @@ import { generateAndDownloadPDF } from '../utils/pdfGenerator';
 const ViewBill: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getBillById, deleteBill } = useEnhancedBilling();
-  const { user } = useEnhancedAuth();
+  const { getBillById, deleteBill } = useSecureBilling();
+  const { user } = useSecureAuth();
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [showSizeOptions, setShowSizeOptions] = useState(false);
   

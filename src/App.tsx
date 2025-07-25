@@ -1,7 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { EnhancedAuthProvider } from './context/EnhancedAuthContext';
-import { EnhancedBillingProvider } from './context/EnhancedBillingContext';
+import { SecureAuthProvider } from './context/SecureAuthContext';
+import { SecureBillingProvider } from './context/SecureBillingContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import LoginForm from './components/auth/LoginForm';
@@ -18,8 +18,8 @@ import Profile from './pages/Profile';
 function App() {
   return (
     <ErrorBoundary>
-      <EnhancedAuthProvider>
-        <EnhancedBillingProvider>
+      <SecureAuthProvider>
+        <SecureBillingProvider>
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<LoginForm />} />
@@ -93,8 +93,8 @@ function App() {
             {/* Catch all route - redirect to dashboard */}
             <Route path="*" element={<Navigate to="/\" replace />} />
           </Routes>
-        </EnhancedBillingProvider>
-      </EnhancedAuthProvider>
+        </SecureBillingProvider>
+      </SecureAuthProvider>
     </ErrorBoundary>
   );
 }

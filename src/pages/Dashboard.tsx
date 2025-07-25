@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
-import { useEnhancedAuth } from '../context/EnhancedAuthContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
+import { useSecureAuth } from '../context/SecureAuthContext';
 import { 
   FileText, 
   Users, 
@@ -16,8 +16,8 @@ import {
 import { formatCurrency, formatDate } from '../utils/calculations';
 
 const Dashboard: React.FC = () => {
-  const { products, customers, bills, dataStats, isLoading } = useEnhancedBilling();
-  const { user } = useEnhancedAuth();
+  const { products, customers, bills, dataStats, isLoading } = useSecureBilling();
+  const { user } = useSecureAuth();
   
   // Get recent bills
   const recentBills = [...bills]

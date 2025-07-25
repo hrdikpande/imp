@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
-import { useEnhancedAuth } from '../../context/EnhancedAuthContext';
+import { useSecureAuth } from '../../context/SecureAuthContext';
 
 const LoginForm: React.FC = () => {
-  const { login, isLoading } = useEnhancedAuth();
+  const { login, isLoading } = useSecureAuth();
   const navigate = useNavigate();
   
   const [formData, setFormData] = useState({

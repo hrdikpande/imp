@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
-import { useEnhancedAuth } from '../context/EnhancedAuthContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
+import { useSecureAuth } from '../context/SecureAuthContext';
 import { Search, FileText, Printer, Trash2, Eye, Download, Filter, FileDown } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '../utils/calculations';
 import { generateAndDownloadPDF } from '../utils/pdfGenerator';
 
 const BillHistory: React.FC = () => {
-  const { bills, deleteBill } = useEnhancedBilling();
-  const { user } = useEnhancedAuth();
+  const { bills, deleteBill } = useSecureBilling();
+  const { user } = useSecureAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending' | 'overdue'>('all');

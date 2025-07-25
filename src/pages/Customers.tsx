@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
 import { Plus } from 'lucide-react';
 import CustomersList from '../components/CustomersList';
 import CustomerForm from '../components/CustomerForm';
@@ -7,7 +7,7 @@ import { Customer } from '../types';
 import toast from 'react-hot-toast';
 
 const Customers: React.FC = () => {
-  const { customers, addCustomer, updateCustomer, deleteCustomer } = useEnhancedBilling();
+  const { customers, addCustomer, updateCustomer, deleteCustomer } = useSecureBilling();
   
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);

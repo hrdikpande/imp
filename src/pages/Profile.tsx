@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Camera, Save, Building, User, MapPin, CreditCard, Shield, Database } from 'lucide-react';
-import { useEnhancedAuth } from '../context/EnhancedAuthContext';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
+import { useSecureAuth } from '../context/SecureAuthContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
 
 const Profile: React.FC = () => {
-  const { user, updateProfile, isLoading, getActiveSessionsCount, revokeAllSessions } = useEnhancedAuth();
-  const { dataStats, backupData, restoreData } = useEnhancedBilling();
+  const { user, updateProfile, isLoading, getActiveSessionsCount, revokeAllSessions } = useSecureAuth();
+  const { dataStats, backupData, restoreData } = useSecureBilling();
   const [activeTab, setActiveTab] = useState('business');
   const [activeSessions, setActiveSessions] = useState(0);
   const [formData, setFormData] = useState({

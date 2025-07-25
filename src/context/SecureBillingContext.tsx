@@ -1,12 +1,17 @@
+// Secure Billing Context with Enhanced Data Management
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Product, Customer, Bill, BillItem } from '../types';
-import { userDataService } from '../services/userDataService';
+import { secureUserDataService } from '../services/secureUserDataService';
 import { generateBillNumber } from '../utils/calculations';
+import { validator } from '../lib/validation';
+import { logger } from '../lib/logger';
+import { errorHandler } from '../lib/errorHandler';
+import { security } from '../lib/security';
 import { v4 as uuidv4 } from 'uuid';
-import { useEnhancedAuth } from './EnhancedAuthContext';
+import { useSecureAuth } from './SecureAuthContext';
 import toast from 'react-hot-toast';
 
-interface EnhancedBillingContextType {
+interface SecureBillingContextType {
   // Products
   products: Product[];
   addProduct: (product: Product) => Promise<void>;
@@ -49,10 +54,10 @@ interface EnhancedBillingContextType {
   restoreData: (backupKey: string) => Promise<boolean>;
 }
 
-const EnhancedBillingContext = createContext<EnhancedBillingContextType | undefined>(undefined);
+const SecureBillingContext = createContext<SecureBillingContextType | undefined>(undefined);
 
-export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, user } = useEnhancedAuth();
+export const SecureBillingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, user } = useSecureAuth();
   
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -76,22 +81,25 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       loadUserData();
     } else {
       // Clear data when not authenticated
-      setProducts([]);
-      setCustomers([]);
-      setBills([]);
-      setCurrentBill(null);
-      setDataStats({ products: 0, customers: 0, bills: 0, totalRevenue: 0 });
+      clearAllData();
     }
   }, [isAuthenticated, user]);
 
   // Debug effect to log currentBill changes
   useEffect(() => {
-    console.log('EnhancedBillingContext: currentBill changed:', currentBill);
-    console.log('EnhancedBillingContext: currentBill items count:', currentBill?.items?.length || 0);
-    if (currentBill?.items) {
-      console.log('EnhancedBillingContext: currentBill items:', currentBill.items);
-    }
+    logger.debug('Current bill changed', { 
+      billId: currentBill?.id,
+      itemsCount: currentBill?.items?.length || 0 
+    });
   }, [currentBill, updateTrigger]);
+
+  const clearAllData = () => {
+    setProducts([]);
+    setCustomers([]);
+    setBills([]);
+    setCurrentBill(null);
+    setDataStats({ products: 0, customers: 0, bills: 0, totalRevenue: 0 });
+  };
 
   const loadUserData = async () => {
     if (!isAuthenticated || !user) return;
@@ -99,31 +107,48 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
     try {
       setIsLoading(true);
       
-      // Load all user data in parallel
-      const [userProducts, userCustomers, userBills, stats] = await Promise.all([
-        userDataService.getUserProducts(),
-        userDataService.getUserCustomers(),
-        userDataService.getUserBills(),
-        userDataService.getUserDataStats()
+      logger.info('Loading user data', { userId: user.id });
+      
+      // Load all user data in parallel with error handling
+      const [userProducts, userCustomers, userBills, stats] = await Promise.allSettled([
+        secureUserDataService.getUserProducts(),
+        secureUserDataService.getUserCustomers(),
+        secureUserDataService.getUserBills(),
+        secureUserDataService.getUserDataStats()
       ]);
 
-      // Auto-fix serial numbers for products
-      const fixedProducts = updateSerialNumbers(userProducts);
+      // Process results with error handling
+      const processedProducts = userProducts.status === 'fulfilled' 
+        ? updateSerialNumbers(userProducts.value) 
+        : [];
       
-      setProducts(fixedProducts);
-      setCustomers(userCustomers);
-      setBills(userBills);
-      setDataStats(stats);
+      const processedCustomers = userCustomers.status === 'fulfilled' 
+        ? userCustomers.value 
+        : [];
       
-      console.log(`Loaded data for ${user.businessName}:`, {
-        products: fixedProducts.length,
-        customers: userCustomers.length,
-        bills: userBills.length,
-        billsWithItems: userBills.filter(b => b.items && b.items.length > 0).length
+      const processedBills = userBills.status === 'fulfilled' 
+        ? userBills.value 
+        : [];
+      
+      const processedStats = stats.status === 'fulfilled' 
+        ? stats.value 
+        : { products: 0, customers: 0, bills: 0, totalRevenue: 0 };
+
+      setProducts(processedProducts);
+      setCustomers(processedCustomers);
+      setBills(processedBills);
+      setDataStats(processedStats);
+      
+      logger.info('User data loaded successfully', {
+        userId: user.id,
+        products: processedProducts.length,
+        customers: processedCustomers.length,
+        bills: processedBills.length,
+        billsWithItems: processedBills.filter(b => b.items && b.items.length > 0).length
       });
     } catch (error) {
-      console.error('Error loading user data:', error);
-      toast.error('Failed to load your data');
+      logger.error('Error loading user data', error);
+      errorHandler.handleError(error as Error);
     } finally {
       setIsLoading(false);
     }
@@ -142,18 +167,23 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
   // Product operations
   const addProduct = async (product: Product) => {
     try {
+      // Validate product data
+      const validation = validator.validateProduct(product);
+      if (!validation.isValid) {
+        throw errorHandler.createValidationError('product', validation.errors.join(', '));
+      }
+
       // Find the highest serial number from current products
       const maxSno = products.reduce((max, p) => Math.max(max, p.sno || 0), 0);
       
       const productWithSno = {
-        ...product,
+        ...validation.sanitizedValue,
         sno: maxSno + 1,
         createdAt: product.createdAt || Date.now()
       };
       
-      const result = await userDataService.createUserProduct(productWithSno);
+      const result = await secureUserDataService.createUserProduct(productWithSno);
       if (result.success && result.product) {
-        // Ensure the returned product has the correct serial number
         const productWithCorrectSno = {
           ...result.product,
           sno: maxSno + 1
@@ -162,54 +192,76 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
         const newProducts = [...products, productWithCorrectSno];
         setProducts(newProducts);
         await updateDataStats();
+        
+        logger.info('Product added successfully', { productId: result.product.id });
         toast.success('Product added successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error adding product:', error);
-      toast.error('Failed to add product');
+      logger.error('Error adding product', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const updateProduct = async (updatedProduct: Product) => {
     try {
-      const result = await userDataService.updateUserProduct(updatedProduct.id, updatedProduct);
+      // Validate product data
+      const validation = validator.validateProduct(updatedProduct);
+      if (!validation.isValid) {
+        throw errorHandler.createValidationError('product', validation.errors.join(', '));
+      }
+
+      const result = await secureUserDataService.updateUserProduct(updatedProduct.id, validation.sanitizedValue);
       if (result.success && result.product) {
         const newProducts = products.map(p => 
           p.id === updatedProduct.id ? { ...result.product!, sno: p.sno } : p
         );
         setProducts(newProducts);
+        
+        logger.info('Product updated successfully', { productId: updatedProduct.id });
         toast.success('Product updated successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error updating product:', error);
-      toast.error('Failed to update product');
+      logger.error('Error updating product', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const deleteProduct = async (id: string) => {
     try {
-      const result = await userDataService.deleteUserProduct(id);
+      const sanitizedId = security.sanitizeInput(id);
+      
+      const result = await secureUserDataService.deleteUserProduct(sanitizedId);
       if (result.success) {
-        const filteredProducts = products.filter(p => p.id !== id);
+        const filteredProducts = products.filter(p => p.id !== sanitizedId);
         const updatedProducts = updateSerialNumbers(filteredProducts);
         setProducts(updatedProducts);
         await updateDataStats();
+        
+        logger.info('Product deleted successfully', { productId: sanitizedId });
         toast.success('Product deleted successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error deleting product:', error);
-      toast.error('Failed to delete product');
+      logger.error('Error deleting product', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const bulkAddProducts = async (newProducts: Product[]) => {
     try {
+      // Validate all products
+      for (const product of newProducts) {
+        const validation = validator.validateProduct(product);
+        if (!validation.isValid) {
+          throw errorHandler.createValidationError('product', `Invalid product "${product.name}": ${validation.errors.join(', ')}`);
+        }
+      }
+
       const maxExistingSno = products.reduce((max, p) => Math.max(max, p.sno || 0), 0);
       
       const productsWithSno = newProducts.map((product, index) => ({
@@ -222,9 +274,8 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       const addedProducts = [];
       for (let i = 0; i < productsWithSno.length; i++) {
         const product = productsWithSno[i];
-        const result = await userDataService.createUserProduct(product);
+        const result = await secureUserDataService.createUserProduct(product);
         if (result.success && result.product) {
-          // Ensure correct serial number
           const productWithCorrectSno = {
             ...result.product,
             sno: maxExistingSno + i + 1
@@ -237,108 +288,135 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
         const allProducts = [...products, ...addedProducts];
         setProducts(allProducts);
         await updateDataStats();
+        
+        logger.info('Bulk products added successfully', { count: addedProducts.length });
         toast.success(`Added ${addedProducts.length} products successfully`);
       }
     } catch (error) {
-      console.error('Error bulk adding products:', error);
-      toast.error('Failed to add products');
+      logger.error('Error bulk adding products', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const refreshProducts = async () => {
     try {
-      const userProducts = await userDataService.getUserProducts();
+      const userProducts = await secureUserDataService.getUserProducts();
       const fixedProducts = updateSerialNumbers(userProducts);
       setProducts(fixedProducts);
+      
+      logger.info('Products refreshed successfully');
     } catch (error) {
-      console.error('Error refreshing products:', error);
-      toast.error('Failed to refresh products');
+      logger.error('Error refreshing products', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   // Customer operations
   const addCustomer = async (customer: Customer) => {
     try {
+      // Validate customer data
+      const validation = validator.validateCustomer(customer);
+      if (!validation.isValid) {
+        throw errorHandler.createValidationError('customer', validation.errors.join(', '));
+      }
+
       const customerWithTimestamp = {
-        ...customer,
+        ...validation.sanitizedValue,
         createdAt: customer.createdAt || Date.now(),
         updatedAt: Date.now(),
         isActive: true
       };
       
-      const result = await userDataService.createUserCustomer(customerWithTimestamp);
+      const result = await secureUserDataService.createUserCustomer(customerWithTimestamp);
       if (result.success && result.customer) {
         const newCustomers = [...customers, result.customer];
         setCustomers(newCustomers);
         await updateDataStats();
+        
+        logger.info('Customer added successfully', { customerId: result.customer.id });
         toast.success('Customer added successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error adding customer:', error);
-      toast.error('Failed to add customer');
+      logger.error('Error adding customer', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const updateCustomer = async (updatedCustomer: Customer) => {
     try {
+      // Validate customer data
+      const validation = validator.validateCustomer(updatedCustomer);
+      if (!validation.isValid) {
+        throw errorHandler.createValidationError('customer', validation.errors.join(', '));
+      }
+
       const customerWithTimestamp = {
-        ...updatedCustomer,
+        ...validation.sanitizedValue,
         updatedAt: Date.now()
       };
       
-      const result = await userDataService.updateUserCustomer(updatedCustomer.id, customerWithTimestamp);
+      const result = await secureUserDataService.updateUserCustomer(updatedCustomer.id, customerWithTimestamp);
       if (result.success && result.customer) {
         const newCustomers = customers.map(c => 
           c.id === updatedCustomer.id ? result.customer! : c
         );
         setCustomers(newCustomers);
+        
+        logger.info('Customer updated successfully', { customerId: updatedCustomer.id });
         toast.success('Customer updated successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error updating customer:', error);
-      toast.error('Failed to update customer');
+      logger.error('Error updating customer', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const deleteCustomer = async (id: string) => {
     try {
-      const result = await userDataService.deleteUserCustomer(id);
+      const sanitizedId = security.sanitizeInput(id);
+      
+      const result = await secureUserDataService.deleteUserCustomer(sanitizedId);
       if (result.success) {
-        const newCustomers = customers.filter(c => c.id !== id);
+        const newCustomers = customers.filter(c => c.id !== sanitizedId);
         setCustomers(newCustomers);
         await updateDataStats();
+        
+        logger.info('Customer deleted successfully', { customerId: sanitizedId });
         toast.success('Customer deleted successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error deleting customer:', error);
-      toast.error('Failed to delete customer');
+      logger.error('Error deleting customer', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const refreshCustomers = async () => {
     try {
-      const userCustomers = await userDataService.getUserCustomers();
+      const userCustomers = await secureUserDataService.getUserCustomers();
       setCustomers(userCustomers);
+      
+      logger.info('Customers refreshed successfully');
     } catch (error) {
-      console.error('Error refreshing customers:', error);
-      toast.error('Failed to refresh customers');
+      logger.error('Error refreshing customers', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   // Bill operations
   const initNewBill = (customer: Customer) => {
-    console.log('EnhancedBillingContext: Initializing new bill for customer:', customer.name);
+    logger.info('Initializing new bill', { customerId: customer.id, customerName: customer.name });
+    
     const newBill: Bill = {
       id: uuidv4(),
       billNumber: generateBillNumber(),
       customer,
-      items: [], // Initialize with empty array
+      items: [],
       subtotal: 0,
       totalDiscount: 0,
       billDiscountType: 'fixed',
@@ -349,36 +427,32 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
     };
     
     setCurrentBill(newBill);
-    forceUpdate(); // Force re-render
-    console.log('EnhancedBillingContext: New bill initialized:', newBill);
+    forceUpdate();
+    
+    logger.debug('New bill initialized', { billId: newBill.id, billNumber: newBill.billNumber });
   };
 
   const addItemToBill = (item: BillItem) => {
-    console.log('EnhancedBillingContext: addItemToBill called with:', item);
+    logger.debug('Adding item to bill', { productName: item.product?.name, quantity: item.quantity });
     
     if (!currentBill) {
-      console.error('EnhancedBillingContext: No current bill to add item to');
+      logger.error('No current bill to add item to');
       toast.error('No active bill found. Please select a customer first.');
       return;
     }
     
-    // Enhanced validation for item data
-    if (!item.product || !item.product.id) {
-      console.error('EnhancedBillingContext: Invalid item - missing product data:', item);
-      toast.error('Invalid product data');
-      return;
-    }
-    
-    if (!item.quantity || item.quantity <= 0) {
-      console.error('EnhancedBillingContext: Invalid item - invalid quantity:', item);
-      toast.error('Invalid quantity');
+    // Validate item data
+    const validation = validator.validateBillItem(item);
+    if (!validation.isValid) {
+      logger.error('Invalid bill item data', { errors: validation.errors });
+      toast.error(validation.errors.join(', '));
       return;
     }
     
     // Enhanced unit price validation with fallbacks
-    const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+    const unitPrice = item.unitPrice || item.product?.unitPrice || item.product?.price || 0;
     if (unitPrice <= 0) {
-      console.error('EnhancedBillingContext: Invalid item - invalid unit price:', item);
+      logger.error('Invalid unit price for item', { item });
       toast.error('Invalid unit price');
       return;
     }
@@ -401,17 +475,15 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
     
     // Validate calculated values
     if (completeItem.subtotal <= 0) {
-      console.error('EnhancedBillingContext: Calculated subtotal is invalid:', completeItem);
+      logger.error('Calculated subtotal is invalid', { item: completeItem });
       toast.error('Invalid item calculation');
       return;
     }
     
-    console.log('EnhancedBillingContext: Complete item to add:', completeItem);
-    
     // Use functional update to ensure state consistency
     setCurrentBill(prevBill => {
       if (!prevBill) {
-        console.error('EnhancedBillingContext: Previous bill is null during update');
+        logger.error('Previous bill is null during update');
         return prevBill;
       }
       
@@ -424,8 +496,11 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
         ...totals
       };
       
-      console.log('EnhancedBillingContext: Bill state updated successfully:', updatedBill);
-      console.log('EnhancedBillingContext: New items array:', newItems);
+      logger.debug('Bill state updated successfully', { 
+        billId: updatedBill.id, 
+        itemsCount: newItems.length 
+      });
+      
       return updatedBill;
     });
     
@@ -434,28 +509,29 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       forceUpdate();
     }, 50);
     
-    console.log('EnhancedBillingContext: Item added successfully, bill updated');
+    logger.info('Item added to bill successfully', { productName: item.product?.name });
   };
 
   const updateBillItem = (index: number, item: BillItem) => {
     if (!currentBill) {
-      console.error('No current bill to update item');
+      logger.error('No current bill to update item');
       return;
     }
     
-    console.log('Updating bill item at index:', index, item);
+    logger.debug('Updating bill item', { index, productName: item.product?.name });
     
-    // Enhanced validation for item data
-    if (!item.product || !item.product.id) {
-      console.error('Invalid item - missing product data:', item);
-      toast.error('Invalid product data');
+    // Validate item data
+    const validation = validator.validateBillItem(item);
+    if (!validation.isValid) {
+      logger.error('Invalid bill item data for update', { errors: validation.errors });
+      toast.error(validation.errors.join(', '));
       return;
     }
     
     // Enhanced unit price validation with fallbacks
-    const unitPrice = item.unitPrice || item.product.unitPrice || item.product.price || 0;
+    const unitPrice = item.unitPrice || item.product?.unitPrice || item.product?.price || 0;
     if (unitPrice <= 0) {
-      console.error('Invalid unit price for item update:', item);
+      logger.error('Invalid unit price for item update', { item });
       toast.error('Invalid unit price');
       return;
     }
@@ -478,7 +554,7 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
     
     // Validate calculated values
     if (completeItem.subtotal <= 0) {
-      console.error('Calculated subtotal is invalid for update:', completeItem);
+      logger.error('Calculated subtotal is invalid for update', { item: completeItem });
       toast.error('Invalid item calculation');
       return;
     }
@@ -504,16 +580,16 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       forceUpdate();
     }, 50);
     
-    console.log('Bill updated with modified item');
+    logger.info('Bill item updated successfully', { index, productName: item.product?.name });
   };
 
   const removeBillItem = (index: number) => {
     if (!currentBill) {
-      console.error('No current bill to remove item from');
+      logger.error('No current bill to remove item from');
       return;
     }
     
-    console.log('Removing bill item at index:', index);
+    logger.debug('Removing bill item', { index });
     
     // Use functional update to ensure state consistency
     setCurrentBill(prevBill => {
@@ -534,16 +610,16 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       forceUpdate();
     }, 50);
     
-    console.log('Bill updated after item removal');
+    logger.info('Bill item removed successfully', { index });
   };
 
   const updateBillDiscount = (discountType: 'fixed' | 'percentage', discountValue: number) => {
     if (!currentBill) {
-      console.error('No current bill to update discount');
+      logger.error('No current bill to update discount');
       return;
     }
     
-    console.log('Updating bill discount:', { discountType, discountValue });
+    logger.debug('Updating bill discount', { discountType, discountValue });
     
     // Use functional update to ensure state consistency
     setCurrentBill(prevBill => {
@@ -564,7 +640,7 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       forceUpdate();
     }, 50);
     
-    console.log('Bill updated with discount');
+    logger.info('Bill discount updated successfully', { discountType, discountValue });
   };
 
   const calculateBillTotals = (items: BillItem[], billDiscountType?: 'fixed' | 'percentage', billDiscountValue?: number) => {
@@ -594,37 +670,33 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
 
   const saveBill = async (note?: string) => {
     if (!currentBill) {
-      console.error('No current bill to save');
+      logger.error('No current bill to save');
       throw new Error('No current bill to save');
     }
     
     if (!currentBill.items || currentBill.items.length === 0) {
-      console.error('Cannot save bill without items');
+      logger.error('Cannot save bill without items');
       throw new Error('Cannot save bill without items. Please add at least one item.');
     }
     
     try {
-      console.log('Saving bill:', currentBill);
+      logger.info('Saving bill', { billId: currentBill.id, billNumber: currentBill.billNumber });
       
-      // Enhanced validation for all items before saving
-      const invalidItems = currentBill.items.filter(item => 
-        !item || 
-        !item.product || 
-        !item.product.id || 
-        !item.quantity || 
-        item.quantity <= 0 || 
-        (!item.unitPrice && !item.product.unitPrice && !item.product.price) ||
-        (item.unitPrice || item.product.unitPrice || item.product.price || 0) <= 0
-      );
+      // Validate bill data
+      const validation = validator.validateBill(currentBill);
+      if (!validation.isValid) {
+        throw errorHandler.createValidationError('bill', validation.errors.join(', '));
+      }
       
-      if (invalidItems.length > 0) {
-        console.error('Invalid items found during save:', invalidItems);
-        throw new Error(`${invalidItems.length} items have invalid data. Please check all items and ensure they have valid products, quantities, and prices.`);
+      // Check if the customer still exists in the active customers list
+      const customerExists = customers.find(customer => customer.id === currentBill.customer.id);
+      if (!customerExists) {
+        throw errorHandler.createBusinessError('save_bill', 'Selected customer does not exist');
       }
       
       // Validate bill totals
       if (!currentBill.total || currentBill.total <= 0) {
-        console.error('Bill total is invalid:', currentBill.total);
+        logger.error('Bill total is invalid', { total: currentBill.total });
         throw new Error('Bill total is invalid. Please check item calculations.');
       }
       
@@ -657,85 +729,85 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
         updatedAt: Date.now()
       };
       
-      // Final validation log
-      console.log('Bill data being saved with validated items:', {
+      logger.debug('Bill data being saved', {
         billNumber: billToSave.billNumber,
         itemsCount: billToSave.items.length,
         total: billToSave.total,
-        customer: billToSave.customer.name,
-        items: billToSave.items.map(item => ({
-          name: item.product.name,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: item.total
-        }))
+        customer: billToSave.customer.name
       });
       
-      const result = await userDataService.createUserBill(billToSave);
+      const result = await secureUserDataService.createUserBill(billToSave);
       if (result.success && result.bill) {
         const newBills = [...bills, result.bill];
         setBills(newBills);
         setCurrentBill(null);
         await updateDataStats();
-        console.log('Bill saved successfully with validated data:', result.bill);
+        
+        logger.info('Bill saved successfully', { billId: result.bill.id, billNumber: result.bill.billNumber });
         toast.success('Bill saved successfully');
       } else {
-        console.error('Failed to save bill:', result.message);
+        logger.error('Failed to save bill', { message: result.message });
         throw new Error(result.message || 'Failed to save bill');
       }
     } catch (error) {
-      console.error('Error saving bill:', error);
+      logger.error('Error saving bill', error);
       throw error;
     }
   };
 
   const getBillById = (id: string) => {
-    const bill = bills.find(bill => bill.id === id);
-    console.log('Getting bill by ID:', id, bill);
+    const sanitizedId = security.sanitizeInput(id);
+    const bill = bills.find(bill => bill.id === sanitizedId);
+    logger.debug('Getting bill by ID', { id: sanitizedId, found: !!bill });
     return bill;
   };
 
   const deleteBill = async (id: string) => {
     try {
-      const result = await userDataService.deleteUserBill(id);
+      const sanitizedId = security.sanitizeInput(id);
+      
+      const result = await secureUserDataService.deleteUserBill(sanitizedId);
       if (result.success) {
-        const newBills = bills.filter(bill => bill.id !== id);
+        const newBills = bills.filter(bill => bill.id !== sanitizedId);
         setBills(newBills);
         await updateDataStats();
+        
+        logger.info('Bill deleted successfully', { billId: sanitizedId });
         toast.success('Bill deleted successfully');
       } else {
-        toast.error(result.message);
+        throw new Error(result.message);
       }
     } catch (error) {
-      console.error('Error deleting bill:', error);
-      toast.error('Failed to delete bill');
+      logger.error('Error deleting bill', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const refreshBills = async () => {
     try {
-      const userBills = await userDataService.getUserBills();
+      const userBills = await secureUserDataService.getUserBills();
       setBills(userBills);
-      console.log('Bills refreshed:', userBills);
+      
+      logger.info('Bills refreshed successfully', { count: userBills.length });
     } catch (error) {
-      console.error('Error refreshing bills:', error);
-      toast.error('Failed to refresh bills');
+      logger.error('Error refreshing bills', error);
+      errorHandler.handleError(error as Error);
     }
   };
 
   const clearCurrentBill = () => {
-    console.log('EnhancedBillingContext: Clearing current bill');
+    logger.info('Clearing current bill');
     setCurrentBill(null);
-    forceUpdate(); // Force re-render
+    forceUpdate();
   };
 
   // Data management
   const updateDataStats = async () => {
     try {
-      const stats = await userDataService.getUserDataStats();
+      const stats = await secureUserDataService.getUserDataStats();
       setDataStats(stats);
     } catch (error) {
-      console.error('Error updating data stats:', error);
+      logger.error('Error updating data stats', error);
     }
   };
 
@@ -746,19 +818,19 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
 
   const backupData = async (): Promise<string> => {
     try {
-      const backupKey = await userDataService.backupUserData();
+      const backupKey = await secureUserDataService.backupUserData();
       toast.success('Data backup created successfully');
       return backupKey;
     } catch (error) {
-      console.error('Error backing up data:', error);
-      toast.error('Failed to backup data');
+      logger.error('Error backing up data', error);
+      errorHandler.handleError(error as Error);
       throw error;
     }
   };
 
   const restoreData = async (backupKey: string): Promise<boolean> => {
     try {
-      const success = await userDataService.restoreUserData(backupKey);
+      const success = await secureUserDataService.restoreUserData(backupKey);
       if (success) {
         await loadUserData();
         toast.success('Data restored successfully');
@@ -767,8 +839,8 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
       }
       return success;
     } catch (error) {
-      console.error('Error restoring data:', error);
-      toast.error('Failed to restore data');
+      logger.error('Error restoring data', error);
+      errorHandler.handleError(error as Error);
       return false;
     }
   };
@@ -808,16 +880,16 @@ export const EnhancedBillingProvider: React.FC<{ children: React.ReactNode }> = 
   };
 
   return (
-    <EnhancedBillingContext.Provider value={value}>
+    <SecureBillingContext.Provider value={value}>
       {children}
-    </EnhancedBillingContext.Provider>
+    </SecureBillingContext.Provider>
   );
 };
 
-export const useEnhancedBilling = () => {
-  const context = useContext(EnhancedBillingContext);
+export const useSecureBilling = () => {
+  const context = useContext(SecureBillingContext);
   if (context === undefined) {
-    throw new Error('useEnhancedBilling must be used within an EnhancedBillingProvider');
+    throw new Error('useSecureBilling must be used within a SecureBillingProvider');
   }
   return context;
 };

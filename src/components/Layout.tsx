@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { Home, Package, Users, FileText, History, Menu, X, User, LogOut, Settings, Database } from 'lucide-react';
-import { useEnhancedAuth } from '../context/EnhancedAuthContext';
-import { useEnhancedBilling } from '../context/EnhancedBillingContext';
+import { useSecureAuth } from '../context/SecureAuthContext';
+import { useSecureBilling } from '../context/SecureBillingContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -12,8 +12,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const location = useLocation();
-  const { user, logout } = useEnhancedAuth();
-  const { dataStats, refreshAllData } = useEnhancedBilling();
+  const { user, logout } = useSecureAuth();
+  const { dataStats, refreshAllData } = useSecureBilling();
   
   const navItems = [
     { to: '/', icon: <Home size={20} />, label: 'Dashboard' },

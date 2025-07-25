@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Upload } from 'lucide-react';
-import { useEnhancedAuth } from '../../context/EnhancedAuthContext';
+import { useSecureAuth } from '../../context/SecureAuthContext';
 
 const RegisterForm: React.FC = () => {
-  const { register, isLoading } = useEnhancedAuth();
+  const { register, isLoading } = useSecureAuth();
   const navigate = useNavigate();
   
   const [currentStep, setCurrentStep] = useState(1);
