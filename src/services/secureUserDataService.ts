@@ -490,7 +490,7 @@ class SecureUserDataService {
         
         // Don't wait after the last attempt
         if (attempt < maxRetries) {
-          const delay = baseDelay * Math.pow(1.5, attempt - 1); // Exponential backoff
+          const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff: 300ms, 600ms, 1200ms, 2400ms, 4800ms
           logger.debug(`Waiting ${delay}ms before retry`, { userId, billId, attempt });
           await new Promise(resolve => setTimeout(resolve, delay));
         }
@@ -499,7 +499,7 @@ class SecureUserDataService {
         
         // Don't wait after the last attempt or if it's a critical error
         if (attempt < maxRetries) {
-          const delay = baseDelay * Math.pow(1.5, attempt - 1);
+          const delay = baseDelay * Math.pow(2, attempt - 1);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
@@ -641,14 +641,17 @@ class SecureUserDataService {
 
       logger.info('Bill and items inserted successfully, attempting retrieval with retry', { userId, billId, billNumber });
 
+      // Ensure database operations are committed before attempting retrieval
+      await new Promise(resolve => setTimeout(resolve, 100)); // Small initial delay to ensure DB commit
+
       // Use retry mechanism to retrieve the bill
-      const bill = await this.getBillWithRetry(billId);
+      const bill = await this.getBillWithRetry(billId, 5, 300);
       
       if (!bill) {
         logger.error('Bill created but could not be retrieved', { userId, billId, billNumber });
         return { 
           success: false, 
-          message: 'Bill was created but could not be retrieved. Please check your bill history.' 
+          message: 'Bill was created but retrieval failed after multiple attempts. The bill may appear in your history shortly.' 
         };
       }
       

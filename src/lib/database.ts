@@ -472,6 +472,9 @@ export class EnhancedDatabaseManager {
         const data = connection.db.export();
         const storageKey = `user_db_${userId}`;
         localStorage.setItem(storageKey, JSON.stringify(Array.from(data)));
+        
+        // Add small delay to ensure localStorage write is complete
+        await new Promise(resolve => setTimeout(resolve, 10));
       }
     } catch (error) {
       logger.error(`Error saving database for user ${userId}`, error);
