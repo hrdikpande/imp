@@ -132,11 +132,15 @@ export const SecureAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const authData = localStorage.getItem('auth_data');
       if (authData) {
-        const decrypted = await security.decryptData(authData);
-        const parsed = JSON.parse(decrypted);
-        return parsed.token;
-      }
-    } catch (error) {
+        try {
+          const decrypted = await security.decryptData(authData);
+          const parsed = JSON.parse(decrypted);
+          return parsed.token;
+        } catch (decryptionError) {
+          logger.warn('Failed to decrypt stored auth data, clearing session', decryptionError);
+          await clearSessionData();
+          return null;
+        }
       logger.error('Error getting stored token', error);
     }
     return null;

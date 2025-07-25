@@ -152,8 +152,8 @@ export class SecurityManager {
       return new TextDecoder().decode(decrypted);
     } catch (error) {
       logger.error('Decryption failed', error);
-      // Fallback to base64 decoding
-      return atob(encryptedData);
+      // Re-throw the error to let the caller handle it
+      throw error;
     }
   }
 
