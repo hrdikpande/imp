@@ -473,39 +473,65 @@ class SecureUserDataService {
   }
 
   // Helper function to retry bill retrieval with exponential backoff
-  private async getBillWithRetry(billId: string, maxRetries: number = 3, baseDelay: number = 500): Promise<Bill | null> {
+  private async getBillWithRetry(billId: string, maxRetries: number = 5, initialDelay: number = 300): Promise<Bill | null> {
     const userId = this.getCurrentUserId();
+    
+    logger.debug(`[getBillWithRetry] Starting retry loop for billId: ${billId}`, { userId, maxRetries, initialDelay });
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        logger.debug(`Attempting to retrieve bill (attempt ${attempt}/${maxRetries})`, { userId, billId });
+        logger.debug(`[getBillWithRetry] Attempt ${attempt}/${maxRetries} for billId: ${billId}`, { userId, billId, attempt });
         
         const bill = await this.getUserBillById(billId);
         if (bill) {
-          logger.info(`Bill retrieved successfully on attempt ${attempt}`, { userId, billId, billNumber: bill.billNumber });
+          logger.info(`[getBillWithRetry] SUCCESS on attempt ${attempt} for billId: ${billId}`, { 
+            userId, 
+            billId, 
+            billNumber: bill.billNumber,
+            attempt,
+            itemsCount: bill.items?.length || 0
+          });
           return bill;
         }
         
-        logger.warn(`Bill not found on attempt ${attempt}`, { userId, billId });
+        logger.warn(`[getBillWithRetry] Bill not found on attempt ${attempt}`, { userId, billId, attempt });
         
         // Don't wait after the last attempt
         if (attempt < maxRetries) {
-          const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff: 300ms, 600ms, 1200ms, 2400ms, 4800ms
-          logger.debug(`Waiting ${delay}ms before retry`, { userId, billId, attempt });
+          const delay = Math.pow(2, attempt - 1) * initialDelay; // Exponential backoff: 300ms, 600ms, 1200ms, 2400ms, 4800ms
+          logger.debug(`[getBillWithRetry] Waiting ${delay}ms before retry ${attempt + 1}`, { 
+            userId, 
+            billId, 
+            attempt, 
+            nextAttempt: attempt + 1,
+            delay 
+          });
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       } catch (error) {
-        logger.error(`Error retrieving bill on attempt ${attempt}`, error, { userId, billId });
+        logger.error(`[getBillWithRetry] Error on attempt ${attempt}`, error, { 
+          userId, 
+          billId, 
+          attempt,
+          error: error instanceof Error ? error.message : String(error)
+        });
         
         // Don't wait after the last attempt or if it's a critical error
         if (attempt < maxRetries) {
-          const delay = baseDelay * Math.pow(2, attempt - 1);
+          const delay = Math.pow(2, attempt - 1) * initialDelay;
+          logger.debug(`[getBillWithRetry] Error recovery: waiting ${delay}ms before retry`, { userId, billId, attempt, delay });
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
     
-    logger.error(`Failed to retrieve bill after ${maxRetries} attempts`, { userId, billId });
+    logger.error(`[getBillWithRetry] FAILED to retrieve bill after ${maxRetries} attempts`, { 
+      userId, 
+      billId, 
+      maxRetries,
+      totalTimeElapsed: `~${Math.pow(2, maxRetries - 1) * initialDelay}ms`,
+      suggestion: 'Bill may appear in history shortly due to database sync delay'
+    });
     return null;
   }
 
@@ -642,16 +668,21 @@ class SecureUserDataService {
       logger.info('Bill and items inserted successfully, attempting retrieval with retry', { userId, billId, billNumber });
 
       // Ensure database operations are committed before attempting retrieval
-      await new Promise(resolve => setTimeout(resolve, 100)); // Small initial delay to ensure DB commit
+      await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay to ensure DB commit
 
       // Use retry mechanism to retrieve the bill
       const bill = await this.getBillWithRetry(billId, 5, 300);
       
       if (!bill) {
-        logger.error('Bill created but could not be retrieved', { userId, billId, billNumber });
+        logger.error('[getBillWithRetry] Bill created but could not be retrieved after all retries', { 
+          userId, 
+          billId, 
+          billNumber,
+          suggestion: 'Check database consistency and indexing'
+        });
         return { 
           success: false, 
-          message: 'Bill was created but retrieval failed after multiple attempts. The bill may appear in your history shortly.' 
+          message: 'Bill was created but retrieval failed after multiple attempts. The bill may appear in your history shortly due to database sync delay.' 
         };
       }
       
