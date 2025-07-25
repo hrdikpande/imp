@@ -146,7 +146,6 @@ export const SecureAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       logger.error('Error getting stored token', error);
       return null;
     }
-    }
     return null;
   };
 
