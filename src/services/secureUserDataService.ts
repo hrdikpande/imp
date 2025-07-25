@@ -668,7 +668,7 @@ class SecureUserDataService {
       logger.info('Bill and items inserted successfully, attempting retrieval with retry', { userId, billId, billNumber });
 
       // Ensure database operations are committed before attempting retrieval
-      await new Promise(resolve => setTimeout(resolve, 200)); // Increased delay to ensure DB commit
+      await new Promise(resolve => setTimeout(resolve, 500)); // Increased delay to ensure DB commit
 
       // Use retry mechanism to retrieve the bill
       const bill = await this.getBillWithRetry(billId, 5, 300);
