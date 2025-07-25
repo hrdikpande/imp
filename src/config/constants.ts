@@ -22,6 +22,7 @@ export const SECURITY_CONFIG = {
   MAX_LOGIN_ATTEMPTS: 5,
   LOCKOUT_DURATION: 15 * 60 * 1000, // 15 minutes
   ENCRYPTION_ALGORITHM: 'AES-256-GCM',
+  ENCRYPTION_KEY: 'SecureBillPro2024!@#$%^&*()_+{}', // 32 character key for consistent encryption
 } as const;
 
 export const VALIDATION_RULES = {

@@ -82,11 +82,12 @@ export class SecurityManager {
       const encoder = new TextEncoder();
       const dataBuffer = encoder.encode(data);
       
-      // Generate a random key if not provided
-      const cryptoKey = key 
+      // Use consistent key from config if not provided
+      const keyToUse = key || SECURITY_CONFIG.ENCRYPTION_KEY;
+      const cryptoKey = keyToUse
         ? await crypto.subtle.importKey(
             'raw',
-            encoder.encode(key.padEnd(32, '0').substring(0, 32)),
+            encoder.encode(keyToUse.padEnd(32, '0').substring(0, 32)),
             { name: 'AES-GCM' },
             false,
             ['encrypt']
@@ -127,10 +128,11 @@ export class SecurityManager {
       const encrypted = combined.slice(12);
 
       const encoder = new TextEncoder();
-      const cryptoKey = key 
+      const keyToUse = key || SECURITY_CONFIG.ENCRYPTION_KEY;
+      const cryptoKey = keyToUse
         ? await crypto.subtle.importKey(
             'raw',
-            encoder.encode(key.padEnd(32, '0').substring(0, 32)),
+            encoder.encode(keyToUse.padEnd(32, '0').substring(0, 32)),
             { name: 'AES-GCM' },
             false,
             ['decrypt']
