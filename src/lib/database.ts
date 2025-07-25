@@ -503,6 +503,22 @@ export class EnhancedDatabaseManager {
     }
   }
 
+  public forceReloadConnection(userId: string): void {
+    try {
+      const connection = this.connections.get(userId);
+      if (connection) {
+        // Save current state before removing connection
+        this.saveUserDatabase(userId);
+        // Remove the connection to force reload from localStorage
+        this.connections.delete(userId);
+        this.connectionPool.delete(userId);
+        logger.debug(`Forced reload of database connection for user: ${userId}`);
+      }
+    } catch (error) {
+      logger.error(`Error forcing connection reload for user ${userId}`, error);
+    }
+  }
+
   private closeConnection(userId: string): void {
     try {
       const connection = this.connections.get(userId);

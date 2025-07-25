@@ -482,6 +482,12 @@ class SecureUserDataService {
       try {
         logger.debug(`[getBillWithRetry] Attempt ${attempt}/${maxRetries} for billId: ${billId}`, { userId, billId, attempt });
         
+        // Force reload connection from localStorage to get fresh state
+        if (attempt > 1) {
+          enhancedDb.forceReloadConnection(userId);
+          logger.debug(`[getBillWithRetry] Forced connection reload on attempt ${attempt}`, { userId, billId });
+        }
+        
         const bill = await this.getUserBillById(billId);
         if (bill) {
           logger.info(`[getBillWithRetry] SUCCESS on attempt ${attempt} for billId: ${billId}`, { 
