@@ -103,7 +103,7 @@ class UserDataService {
       const values = [];
 
       Object.entries(updates).forEach(([key, value]) => {
-        if (value !== undefined && key !== 'id' && key !== 'createdAt' && key !== 'sno') {
+        if (value !== undefined && key !== 'id' && key !== 'createdAt' && key !== 'sno' && key !== 'price') {
           const dbKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
           setClause.push(`${dbKey} = ?`);
           values.push(value);
