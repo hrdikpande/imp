@@ -320,6 +320,7 @@ export const SecureAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       logger.error('Revoke all sessions error', error);
       toast.error('Failed to revoke sessions');
     }
+  }
   const value = {
     ...authState,
     login,
