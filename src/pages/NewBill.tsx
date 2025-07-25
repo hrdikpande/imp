@@ -297,6 +297,15 @@ const NewBill: React.FC = () => {
       return;
     }
     
+    // Check if the customer still exists in the active customers list
+    const customerExists = customers.find(customer => customer.id === currentBill.customer.id);
+    if (!customerExists) {
+      toast.error('The selected customer no longer exists. Please select a different customer.');
+      clearCurrentBill();
+      window.history.replaceState(null, '', '/new-bill');
+      return;
+    }
+    
     // Validate all items have required data
     const invalidItems = currentBill.items.filter(item => 
       !item.product || !item.product.id || !item.quantity || !item.unitPrice
