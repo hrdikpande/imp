@@ -346,3 +346,4 @@ const useSecureAuth = () => {
     throw new Error('useSecureAuth must be used within a SecureAuthProvider');
   }
   return context;
+}
