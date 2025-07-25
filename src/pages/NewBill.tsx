@@ -28,6 +28,7 @@ const NewBill: React.FC = () => {
     updateBillDiscount,
     saveBill,
     clearCurrentBill
+  } = useSecureBilling();
   
   // UI State Management
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -350,7 +351,7 @@ const NewBill: React.FC = () => {
   // Customer Selection View
   if (currentView === 'select-customer') {
     return (
-      <div className="space-y-6 animate-fade-in\" key={`customer-select-${renderKey}`}>
+      <div className="space-y-6 animate-fade-in" key={`customer-select-${renderKey}`}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Select Customer</h1>
