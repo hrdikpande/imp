@@ -321,7 +321,6 @@ const NewBill: React.FC = () => {
       console.log('NewBill: Saving bill with items:', currentBill.items);
       
       await saveBill(billNote.trim() || undefined);
-      toast.success('Bill saved successfully');
       
       // Clear the URL and navigate to bill history
       window.history.replaceState(null, '', '/bill-history');

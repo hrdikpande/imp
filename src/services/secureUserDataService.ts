@@ -599,12 +599,20 @@ class SecureUserDataService {
 
       const bill = await this.getUserBillById(billId);
       
+      if (!bill) {
+        logger.error('Bill created but could not be retrieved', { userId, billId, billNumber });
+        return { 
+          success: false, 
+          message: 'Bill was created but could not be retrieved. Please check your bill history.' 
+        };
+      }
+      
       logger.info('Bill created successfully', { userId, billId, billNumber });
       
       return { 
         success: true, 
         message: 'Bill created successfully', 
-        bill: bill! 
+        bill 
       };
     } catch (error) {
       logger.error('Error creating user bill', error, { userId });
