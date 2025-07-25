@@ -472,15 +472,53 @@ class SecureUserDataService {
     }
   }
 
+  // Helper function to retry bill retrieval with exponential backoff
+  private async getBillWithRetry(billId: string, maxRetries: number = 3, baseDelay: number = 500): Promise<Bill | null> {
+    const userId = this.getCurrentUserId();
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.debug(`Attempting to retrieve bill (attempt ${attempt}/${maxRetries})`, { userId, billId });
+        
+        const bill = await this.getUserBillById(billId);
+        if (bill) {
+          logger.info(`Bill retrieved successfully on attempt ${attempt}`, { userId, billId, billNumber: bill.billNumber });
+          return bill;
+        }
+        
+        logger.warn(`Bill not found on attempt ${attempt}`, { userId, billId });
+        
+        // Don't wait after the last attempt
+        if (attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(1.5, attempt - 1); // Exponential backoff
+          logger.debug(`Waiting ${delay}ms before retry`, { userId, billId, attempt });
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      } catch (error) {
+        logger.error(`Error retrieving bill on attempt ${attempt}`, error, { userId, billId });
+        
+        // Don't wait after the last attempt or if it's a critical error
+        if (attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(1.5, attempt - 1);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    logger.error(`Failed to retrieve bill after ${maxRetries} attempts`, { userId, billId });
+    return null;
+  }
+
   public async createUserBill(billData: any): Promise<{ success: boolean; message: string; bill?: Bill }> {
     const userId = this.getCurrentUserId();
     
     try {
-      logger.debug('Creating bill in database', { userId, billNumber: billData.billNumber });
+      logger.info('Starting bill creation process', { userId, billNumber: billData.billNumber });
       
       // Validate bill data
       const validation = validator.validateBill(billData);
       if (!validation.isValid) {
+        logger.warn('Bill validation failed', { userId, errors: validation.errors });
         return { 
           success: false, 
           message: validation.errors.join(', ') 
@@ -490,6 +528,7 @@ class SecureUserDataService {
       // Verify customer exists
       const customerExists = await this.getUserCustomerById(billData.customer.id);
       if (!customerExists) {
+        logger.warn('Customer not found for bill creation', { userId, customerId: billData.customer.id });
         return { 
           success: false, 
           message: 'Selected customer does not exist' 
@@ -536,6 +575,8 @@ class SecureUserDataService {
         };
       }
 
+      logger.debug('Inserting bill into database', { userId, billId, billNumber });
+
       // Insert bill
       const billQuery = `
         INSERT INTO bills (
@@ -565,6 +606,7 @@ class SecureUserDataService {
         now
       ]);
 
+      logger.debug('Bill inserted successfully, now inserting items', { userId, billId, itemsCount: billData.items.length });
       // Insert bill items
       for (const item of billData.items) {
         const itemQuery = `
@@ -597,7 +639,10 @@ class SecureUserDataService {
         ]);
       }
 
-      const bill = await this.getUserBillById(billId);
+      logger.info('Bill and items inserted successfully, attempting retrieval with retry', { userId, billId, billNumber });
+
+      // Use retry mechanism to retrieve the bill
+      const bill = await this.getBillWithRetry(billId);
       
       if (!bill) {
         logger.error('Bill created but could not be retrieved', { userId, billId, billNumber });
@@ -607,7 +652,13 @@ class SecureUserDataService {
         };
       }
       
-      logger.info('Bill created successfully', { userId, billId, billNumber });
+      logger.info('Bill creation process completed successfully', { 
+        userId, 
+        billId, 
+        billNumber, 
+        itemsCount: bill.items?.length || 0,
+        total: bill.total 
+      });
       
       return { 
         success: true, 
@@ -615,7 +666,7 @@ class SecureUserDataService {
         bill 
       };
     } catch (error) {
-      logger.error('Error creating user bill', error, { userId });
+      logger.error('Error in bill creation process', error, { userId, billNumber: billData.billNumber });
       return { 
         success: false, 
         message: `Failed to create bill: ${error instanceof Error ? error.message : 'Unknown error'}` 
