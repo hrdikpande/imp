@@ -488,18 +488,29 @@ class SecureUserDataService {
           logger.debug(`[getBillWithRetry] Forced connection reload on attempt ${attempt}`, { userId, billId });
         }
         
-        const bill = await this.getUserBillById(billId);
-        if (bill) {
-          logger.info(`[getBillWithRetry] SUCCESS on attempt ${attempt} for billId: ${billId}`, { 
-            userId, 
-            billId, 
-            billNumber: bill.billNumber,
-            attempt,
-            itemsCount: bill.items?.length || 0
-          });
-          return bill;
-        }
+        // Use direct database query instead of getUserBillById to ensure fresh data
+        const result = await enhancedDb.executeQuery(
+          userId,
+          'SELECT * FROM bills WHERE id = ?',
+          [billId]
+        );
         
+        if (!result || !result.id) {
+          logger.warn(`[getBillWithRetry] Bill not found in database on attempt ${attempt}`, { userId, billId, attempt });
+        } else {
+          // Get the full bill with details using the database result
+          const bill = await this.getBillWithDetails(result);
+          if (bill) {
+            logger.info(`[getBillWithRetry] SUCCESS on attempt ${attempt} for billId: ${billId}`, { 
+              userId, 
+              billId, 
+              billNumber: bill.billNumber,
+              attempt,
+              itemsCount: bill.items?.length || 0
+            });
+            return bill;
+          }
+        }
         logger.warn(`[getBillWithRetry] Bill not found on attempt ${attempt}`, { userId, billId, attempt });
         
         // Don't wait after the last attempt
