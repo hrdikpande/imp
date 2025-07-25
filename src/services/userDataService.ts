@@ -619,10 +619,9 @@ class UserDataService {
       console.log(`Final items array for bill ${billData.bill_number}:`, items);
       console.log(`Items count: ${items.length}`);
 
-      // If no items found, return null to prevent inconsistent bill objects
+      // If no items found, log warning but still return bill object
       if (items.length === 0) {
-        console.error(`Bill ${billData.bill_number} has no valid items, skipping`);
-        return null;
+        console.warn(`Bill ${billData.bill_number} has no valid items, but returning bill object with empty items array`);
       }
 
       const bill: Bill = {
