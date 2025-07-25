@@ -340,10 +340,9 @@ export const SecureAuthProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
 };
 
-export const useSecureAuth = () => {
+const useSecureAuth = () => {
   const context = useContext(SecureAuthContext);
   if (context === undefined) {
     throw new Error('useSecureAuth must be used within a SecureAuthProvider');
   }
   return context;
-};
