@@ -335,8 +335,11 @@ export class EnhancedDatabaseManager {
   private async executeQueryInternal(db: any, query: string, params: any[]): Promise<any> {
     const stmt = db.prepare(query);
     try {
-      const result = stmt.getAsObject(params);
-      return result;
+      stmt.bind(params);
+      if (stmt.step()) {
+        return stmt.getAsObject();
+      }
+      return null;
     } finally {
       stmt.free();
     }
